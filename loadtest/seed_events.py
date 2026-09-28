@@ -14,8 +14,9 @@ project, the API keys from .env, and the event partitions), then loads with COPY
 - the other events: random users, times, and names (workload.EVENT_SHARES).
 Events are written in time order, the way live ingestion appends them, so rows sit on disk
 roughly as they would in production, and only one day's indexes are being written at a time.
-Finally it runs VACUUM ANALYZE, as autovacuum eventually would, so query plans see fresh
-statistics and the visibility map is set.
+Finally it runs VACUUM ANALYZE, so query plans see fresh statistics and the visibility map
+is set. (Autovacuum does that for each partition eventually, but never analyzes the
+partitioned table itself; see ADR-023.)
 """
 
 import argparse

@@ -20,8 +20,14 @@ export async function createKey(_state: CreateKeyState, form: FormData): Promise
   }
 }
 
-export async function revokeKey(id: string): Promise<void> {
+/** Returns the API's reason when it refuses, as it does for the project's last server key. */
+export async function revokeKey(id: string): Promise<ActionError | null> {
   await requireSignedIn();
-  await api.revokeApiKey(id);
+  try {
+    await api.revokeApiKey(id);
+  } catch (error) {
+    return toActionError(error);
+  }
   revalidatePath("/settings");
+  return null;
 }

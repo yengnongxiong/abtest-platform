@@ -55,9 +55,14 @@ async def domain_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 async def validation_error(request: Request, exc: Exception) -> JSONResponse:
-    """A request that doesn't match its model: 422, with pydantic's list of problems."""
+    """A request that doesn't match its model: 422, with pydantic's list of problems.
+
+    Each problem leaves out the input it rejected: that input can be a number JSON can't
+    encode (1e400 parses as infinity), which would turn this answer into a 500.
+    """
     assert isinstance(exc, RequestValidationError)
-    return error_response(422, "validation_error", "the request is invalid", exc.errors())
+    problems = [{k: v for k, v in problem.items() if k != "input"} for problem in exc.errors()]
+    return error_response(422, "validation_error", "the request is invalid", problems)
 
 
 async def http_error(request: Request, exc: Exception) -> JSONResponse:

@@ -28,6 +28,8 @@ Key = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
 EventName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_$.:-]{1,100}$")]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 BasisPoints = Annotated[int, Field(ge=0, le=10_000)]
+# JSON's 1e400 parses as infinity, which "> 0" alone lets through.
+PositiveFinite = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 MetricKind = Literal["conversion", "mean"]
 Direction = Literal["increase", "decrease"]
 Status = Literal["draft", "running", "stopped"]
@@ -110,7 +112,7 @@ class ExperimentMetricIn(RequestModel):
     role: Role
     # The PM's pre-registered baseline: a rate for a conversion metric, a per-user mean for
     # a mean metric. It sets the metric's mSPRT tau. Required to start.
-    expected_baseline: float | None = Field(default=None, gt=0)
+    expected_baseline: PositiveFinite | None = None
 
 
 def _check_variants_and_metrics(
@@ -138,7 +140,7 @@ class ExperimentCreate(RequestModel):
     traffic_bp: BasisPoints
     analysis_type: AnalysisType = "sequential"
     alpha: float = Field(default=0.05, gt=0, lt=1)
-    mde_relative: float | None = Field(default=None, gt=0)
+    mde_relative: PositiveFinite | None = None
     # Variants in list order become positions 0, 1, 2, ...
     variants: list[VariantIn] = Field(default_factory=list, max_length=20)
     metrics: list[ExperimentMetricIn] = Field(default_factory=list, max_length=50)
@@ -158,7 +160,7 @@ class ExperimentUpdate(RequestModel):
     traffic_bp: BasisPoints | None = None
     analysis_type: AnalysisType | None = None
     alpha: float | None = Field(default=None, gt=0, lt=1)
-    mde_relative: float | None = Field(default=None, gt=0)
+    mde_relative: PositiveFinite | None = None
     # When given, these replace the whole list.
     variants: list[VariantIn] | None = Field(default=None, max_length=20)
     metrics: list[ExperimentMetricIn] | None = Field(default=None, max_length=50)
@@ -283,6 +285,13 @@ class Config(BaseModel):
 
 EXPOSURE_EVENT = "$exposure"
 MAX_PROPERTIES_BYTES = 4096
+# An event's value: finite, and at most a trillion either way. That is far above any real
+# order value, and small enough that attribution's per-user sums of squares can't overflow
+# a double: 1e200 would, and then every look at the experiment would fail.
+MAX_ABS_VALUE = 1e12
+EventValue = Annotated[
+    float, Field(strict=True, allow_inf_nan=False, ge=-MAX_ABS_VALUE, le=MAX_ABS_VALUE)
+]
 
 
 class SdkInfo(BaseModel):
@@ -303,7 +312,7 @@ class EventIn(RequestModel):
     user_id: str
     name: EventName
     occurred_at: AwareDatetime  # must carry a time zone: a naive time is ambiguous
-    value: Annotated[float, Field(strict=True, allow_inf_nan=False)] | None = None
+    value: EventValue | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("user_id")

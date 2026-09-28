@@ -45,10 +45,15 @@ async def raw_body(request: Request) -> bytes:
 
 @router.post("/events", status_code=202)
 def post_events(
-    project: Annotated[UUID, Depends(rate_limited_project)],
     body: Annotated[bytes, Depends(raw_body)],
+    project: Annotated[UUID, Depends(rate_limited_project)],
     conn: ConnDep,
 ) -> EventsResult:
     """Store a batch of events. Duplicates are counted, not stored again; each invalid event
-    comes back with its index and the reason."""
+    comes back with its index and the reason.
+
+    FastAPI resolves dependencies in the order they're declared, and `body` comes first: the
+    upload is read before checking the key takes a pooled connection. The other way round, a
+    client that stalls mid-upload holds a connection, and four of them hold the whole pool.
+    """
     return ingest(conn, project, parse_batch(body), datetime.now(UTC))

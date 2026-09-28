@@ -2,6 +2,7 @@
 
 import json
 import random
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -137,6 +138,10 @@ def hours_ago(hours: float) -> str:
         (event(occurred_at=hours_ago(-0.2)), "occurred_at is more than 5 minutes in the future"),
         (event(value="12"), "value"),
         (event(value=True), "value"),
+        # Regression: 1e200 was stored, and squaring it overflowed the attribution query,
+        # so every later look at the experiment failed.
+        (event(value=1e200), "value: Input should be less than or equal to"),
+        (event(value=-1e13), "value: Input should be greater than or equal to"),
         (event(properties=["a"]), "properties"),
         (event(properties={"text": "x" * 5000}), "properties: must be at most 4096 bytes"),
         (event(properties={"text": "a\x00b"}), "properties: must not contain NUL"),
@@ -158,6 +163,14 @@ def test_bad_events_are_rejected_with_a_reason_and_the_rest_accepted(
     assert len(result["rejected"]) == 1
     assert result["rejected"][0]["index"] == 0
     assert reason in result["rejected"][0]["reason"]
+
+
+def test_values_up_to_a_trillion_either_way_are_accepted(
+    api: TestClient, sdk: dict[str, str]
+) -> None:
+    events = [event(value=1e12), event(value=-1e12), event(value=49.99)]
+
+    assert send(api, sdk, events) == {"accepted": 3, "duplicates": 0, "rejected": []}
 
 
 def test_a_text_plain_body_with_the_key_in_the_url_is_accepted(
@@ -183,6 +196,8 @@ def test_a_text_plain_body_with_the_key_in_the_url_is_accepted(
         (b"\xff\xfe\xfa", 400, "invalid_json"),
         (json.dumps({"events": []}).encode(), 422, "invalid_batch"),
         (json.dumps({"sdk": SDK, "events": [event()] * 501}).encode(), 422, "invalid_batch"),
+        # Regression: 1e400 parses as infinity, and echoing it back in the 422 made a 500.
+        (b'{"sdk": 1e400, "events": []}', 422, "invalid_batch"),
         (b" " * 1_000_001, 413, "body_too_large"),
     ],
 )
@@ -202,6 +217,30 @@ def test_the_size_cap_holds_without_a_content_length(api: TestClient, sdk: dict[
     response = api.post("/v1/events", content=chunks, headers=sdk)
 
     assert response.status_code == 413
+
+
+def test_the_body_is_read_before_a_database_connection_is_taken(
+    api_database: str, sdk: dict[str, str]
+) -> None:
+    # Regression: the endpoint took a pooled connection (to check the key) before reading the
+    # body. Four clients that stalled mid-upload held all four connections, and the whole API,
+    # /health included, stopped answering for as long as they kept their sockets open.
+    app = create_app(Settings(database_url=api_database))
+    in_use_mid_upload: list[int] = []
+    with TestClient(app) as client:
+        pool = app.state.pool
+        pool.wait()  # every connection open, so the count below is only what's in use
+
+        def slow_body() -> Iterator[bytes]:
+            yield b'{"sdk": {"name": "t", "version": "1"}, '
+            stats = pool.get_stats()
+            in_use_mid_upload.append(stats["pool_size"] - stats["pool_available"])
+            yield b'"events": []}'
+
+        response = client.post("/v1/events", content=slow_body(), headers=sdk)
+
+    assert response.status_code == 202
+    assert in_use_mid_upload == [0]
 
 
 def test_events_need_a_client_key(api: TestClient) -> None:

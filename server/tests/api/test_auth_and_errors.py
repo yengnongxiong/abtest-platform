@@ -125,6 +125,21 @@ def test_unknown_fields_are_rejected_not_ignored(api: TestClient, admin: dict[st
     assert response.status_code == 422
 
 
+def test_a_number_json_cannot_encode_gets_a_422_not_a_500(
+    api: TestClient, admin: dict[str, str]
+) -> None:
+    # Regression: 1e400 (valid JSON, but past the largest float) parses as infinity. The 422
+    # echoed every rejected input back, and JSON can't encode infinity, so it became a 500.
+    headers = admin | {"Content-Type": "application/json"}
+
+    response = api.post(
+        "/admin/flags", content='{"key": "big", "rollout_bp": 1e400}', headers=headers
+    )
+
+    assert response.status_code == 422
+    assert_error(response.json(), "validation_error")
+
+
 def test_unexpected_errors_use_the_error_format_and_hide_internals(api_database: str) -> None:
     app = create_app(Settings(database_url=api_database))
 

@@ -6,6 +6,7 @@ import { FormError } from "@/components/FormError";
 import type { ActionError } from "@/lib/actions";
 import { count, daysNeeded } from "@/lib/format";
 import type { Metric, Role } from "@/lib/types";
+import { controlAfterRemoving } from "@/lib/variants";
 
 import { createExperiment, type NewExperiment } from "./actions";
 
@@ -191,7 +192,7 @@ export function NewExperimentForm({ metrics }: { metrics: Metric[] }) {
                   type="button"
                   onClick={() => {
                     setVariants(variants.filter((_, j) => j !== i));
-                    setControlIndex(0);
+                    setControlIndex(controlAfterRemoving(controlIndex, i));
                   }}
                   className="text-sm text-muted hover:text-alert"
                 >

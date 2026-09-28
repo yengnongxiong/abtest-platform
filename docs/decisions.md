@@ -472,3 +472,35 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 
   The README lists this as future work.
 - Nobody can click a live link. The recording and the quickstart have to do that job.
+
+---
+
+## ADR-023: The attribution query never uses a nested loop (health check)
+
+**Context.** Postgres picks the attribution query's join method (`AGGREGATE` in `db/results.py`) from its table statistics. A table that has just received its first rows has none until autovacuum analyzes it, which can take up to a minute. That happens on a new database, and to each day's new events partition. Autovacuum also never analyzes the partitioned `events` table itself, only its partitions. In the health check, `make traffic SCENARIO=checkout_button ARGS="--use-running ..."` on a fresh stack sent 40,000 users, and then its recompute timed out at the client's 5-second limit. `EXPLAIN ANALYZE` showed why: estimating a handful of rows on each side, Postgres chose a nested loop over a materialized scan of every purchase event. It compared every exposure with every event, so the time grew with their product. A minute later, after autovacuum had run, the same recompute answered at once.
+
+**Decision.** `aggregate()` runs `SET LOCAL enable_nestloop = off` before the query, inside the look's transaction. `loadtest/explain_attribution.py` does the same, so `make perf` still measures the query the worker runs. A regression test builds a population that has no statistics and checks that the plan has no nested loop.
+
+**Alternatives considered.**
+- *Run `ANALYZE` from the worker*, before each look or daily. A look would still land in the gap before the first analysis of a new partition, and it adds a maintenance job to reason about.
+- *A `LATERAL` subquery per exposure.* It forces an index lookup per user, whatever the statistics say, but a large experiment then makes one probe per user per partition, where the hash join makes a single pass.
+- *Leave it.* It heals itself within a minute, but the documented first-run flow (create, start, `make traffic`) is exactly the case that hits it.
+
+**Consequences.**
+- The query always aggregates a whole population, where a hash join is the right plan. With statistics, Postgres chose hash joins for every row with the covering index in `docs/performance.md`, and `make perf` at 1M planned every row the same after the change.
+- A very small experiment on a very large events table loses the option of a per-user index lookup. It reads the metric's events since the start instead, which stays linear.
+- `SET LOCAL` lasts until the transaction ends, so the rest of a worker run also plans without nested loops. Those are single-table lookups by key, so nothing else changes.
+
+---
+
+## ADR-024: Read the event body before taking a database connection (health check)
+
+**Context.** `POST /v1/events` checks the client key, which needs a pooled database connection, and reads the body, which can take as long as the client wants. It used to check the key first. The pool has 4 connections, so four clients that sent their headers and then stalled mid-upload held the whole pool. `/health` answered 503 and `GET /v1/config` failed after the pool's 30-second timeout, for as long as the sockets stayed open. Any visitor can do this, because client keys are public.
+
+**Decision.** `post_events` declares the body dependency first. FastAPI resolves dependencies in declaration order, so the body is read, still capped at 1 MB while reading, before checking the key takes a connection. A regression test sends a body in two parts and checks that no connection is in use between them.
+
+**Alternatives considered.**
+- *A bigger pool.* That only raises the number of stalled uploads needed.
+- *A body-read timeout.* Uvicorn has none, and one would belong in a reverse proxy, which the local stack doesn't have.
+
+**Consequences.** An unauthenticated or rate-limited client's body is read (up to 1 MB) before it gets its 401 or 429. That costs the server at most a megabyte of reading per request, and no database connection. A production deployment would still put a reverse proxy in front, to buffer uploads and time out slow ones.

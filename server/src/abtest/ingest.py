@@ -34,7 +34,8 @@ def parse_batch(body: bytes) -> EventBatch:
     except ValidationError as error:
         raise Unprocessable(
             "invalid_batch", "the body must be {sdk, events} with at most 500 events",
-            error.errors(include_url=False, include_context=False),
+            # Not the rejected input: 1e400 parses as infinity, which JSON can't encode.
+            error.errors(include_url=False, include_context=False, include_input=False),
         ) from None  # fmt: skip
 
 

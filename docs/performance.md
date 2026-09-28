@@ -34,7 +34,7 @@ What this system does with 1 million and 10 million events on one laptop: how fa
 - two running 50/50 experiments whose metrics count `purchase`: a **large** one (`checkout-button`: every user, started 3 days ago) and a **small** one (`free-shipping-banner`: 2% of users, started 1 day ago). 60% of the users each one includes are exposed, at a random time since its start, to the variant the real assignment code picks: one `exposures` row and one `$exposure` event each;
 - the other events, named in a store's proportions (`loadtest/workload.py`): 55% `page_view`, 17% `search`, 15% `add_to_cart`, 5% `signup`, 8% `purchase` (with an order value).
 
-Rows are written in time order, as live ingestion appends them. The seed ends with `VACUUM ANALYZE`, as autovacuum eventually would, so plans see fresh statistics and the visibility map is set.
+Rows are written in time order, as live ingestion appends them. The seed ends with `VACUUM ANALYZE`, so plans see fresh statistics and the visibility map is set. Autovacuum eventually does the same for each daily partition, but never analyzes the partitioned `events` table itself, and a new partition has no statistics at all until its first analysis. The worker's query therefore turns nested loops off, so missing statistics can't produce a quadratic plan ([ADR-023](decisions.md#adr-023-the-attribution-query-never-uses-a-nested-loop-health-check)), and `make perf` plans it the same way.
 
 **Reproduce.** Warning: on a fanless laptop these runs get it hot. The 10M seed keeps the CPUs busy for about 4 minutes, `make perf` on 10M for several more, and each load-test run for a minute.
 ```sh
@@ -84,6 +84,8 @@ The index sizes compare two things at once: the covering index's extra column, a
 | free-shipping-banner (5,976) | no index | Hash Right Join; Seq Scan (2) | 62 ms (61 to 64) | shared hit=6770 read=40783 |
 | free-shipping-banner (5,976) | 0001 index | Nested Loop; Index Scan (2) | 21 ms (20 to 28) | shared hit=30130 |
 | free-shipping-banner (5,976) | 0002 index | Hash Right Join; Index Only Scan (2) | 20 ms (19 to 28) | shared hit=5127 |
+
+These plans were measured before the health check turned nested loops off for this query (ADR-023). The one nested loop above, the small experiment with the 0001 index, would now be planned as a hash join; the other rows are hash joins already. The 10M run wasn't repeated (it takes several minutes of heavy load). Rerunning `make perf` at 1M after the change planned every row as in the 1M table.
 
 What the plans show:
 

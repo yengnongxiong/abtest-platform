@@ -1,8 +1,8 @@
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 
-import { revokeKey } from "./actions";
 import { CreateKeyForm } from "./CreateKeyForm";
+import { RevokeButton } from "./RevokeButton";
 
 export default async function SettingsPage() {
   const keys = await api.listApiKeys();
@@ -31,11 +31,7 @@ export default async function SettingsPage() {
                 {key.revoked_at ? (
                   <span className="text-muted">Revoked {formatDate(key.revoked_at)}</span>
                 ) : (
-                  <form action={revokeKey.bind(null, key.id)}>
-                    <button type="submit" className="text-accent hover:underline">
-                      Revoke
-                    </button>
-                  </form>
+                  <RevokeButton id={key.id} />
                 )}
               </td>
             </tr>

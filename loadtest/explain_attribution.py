@@ -27,7 +27,7 @@ from psycopg.conninfo import make_conninfo
 from workload import EXPERIMENTS, PERF_DATABASE
 
 from abtest.config import Settings
-from abtest.db.results import AGGREGATE, aggregate_params, experiment_to_analyze
+from abtest.db.results import AGGREGATE, NO_NESTED_LOOP, aggregate_params, experiment_to_analyze
 
 STATES = {
     "no index": ["DROP INDEX events_attribution"],
@@ -90,6 +90,7 @@ def measure(
     with conn.transaction(force_rollback=True):
         for statement in STATES[state]:
             conn.execute(statement)  # fixed DDL from STATES, never values
+        conn.execute(NO_NESTED_LOOP)  # as aggregate() plans it for the worker
         size = conn.execute(INDEX_SIZE).fetchone()
         assert size is not None
         conn.execute(AGGREGATE, params).fetchall()  # fills the cache

@@ -61,7 +61,7 @@ export function resultSentence(input: SentenceInput): string {
       "set up for, which usually means a bug in how users are assigned or logged."
     );
   }
-  if (c.rel_lift === null || c.rel_ci_low === null || c.rel_ci_high === null) {
+  if (c.rel_lift === null) {
     return c.insufficient_data !== null
       ? `Not enough data to compare ${variantName} yet.`
       : `${variantName} can't be compared as a percentage change: the control's ${metricName} is zero.`;
@@ -72,7 +72,11 @@ export function resultSentence(input: SentenceInput): string {
     .replace("+", "")}`;
   const level = `${Math.round((1 - input.alpha) * 100)}%`;
   const interval = input.analysisType === "sequential" ? `${level} always-valid CI` : `${level} CI`;
-  const evidence = `(${interval} ${signedPercent(c.rel_ci_low)} to ${signedPercent(c.rel_ci_high)})`;
+  // An empty always-valid CI (PRD §14: the looks disagree) leaves out only the interval.
+  const evidence =
+    c.rel_ci_low === null || c.rel_ci_high === null
+      ? `(no ${interval}: the checks so far disagree about the effect's size)`
+      : `(${interval} ${signedPercent(c.rel_ci_low)} to ${signedPercent(c.rel_ci_high)})`;
   const conclusion = c.significant
     ? "This is statistically significant."
     : input.analysisType === "sequential"

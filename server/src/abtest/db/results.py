@@ -108,6 +108,14 @@ FROM per_user
 GROUP BY variant_id
 """
 
+# Postgres picks AGGREGATE's join from its statistics, and a table that has just received its
+# first rows (a new database, or each day's new partition) has none until autovacuum analyzes
+# it, up to a minute later. Postgres then guessed a handful of events and chose a nested loop
+# that compared every exposure with every event, so the time grew with their product. The
+# query always aggregates a whole population, where a hash join is the right plan; with
+# statistics, Postgres picks one anyway (ADR-023). Local to the transaction.
+NO_NESTED_LOOP = "SET LOCAL enable_nestloop = off"
+
 
 def experiments_due(conn: psycopg.Connection) -> list[ExperimentToAnalyze]:
     """Every running experiment, and every stopped one still missing its final snapshot
@@ -169,6 +177,8 @@ def aggregate(
     metric: MetricToAnalyze,
     cutoff: datetime,
 ) -> dict[UUID, VariantAggregate]:
+    """Run AGGREGATE. Call it inside a transaction, which NO_NESTED_LOOP's setting lasts for."""
+    conn.execute(NO_NESTED_LOOP)
     rows = conn.execute(AGGREGATE, aggregate_params(experiment, metric, cutoff)).fetchall()
     return {
         variant_id: VariantAggregate(

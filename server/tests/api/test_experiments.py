@@ -1,5 +1,6 @@
 """The experiment lifecycle through the admin API (PRD §9, §11)."""
 
+import json
 from typing import Any
 
 import pytest
@@ -267,6 +268,50 @@ def test_a_conversion_baseline_must_be_a_rate(
     assert response.json()["error"]["details"]["problems"] == [
         "metric 'purchase' is a conversion rate, so its expected baseline must be below 1"
     ]
+
+
+HUGE = 123456.5  # stands in for 1e400, which Python's json module can't write
+
+
+def with_1e400(body: dict[str, Any]) -> str:
+    """The body as JSON text, with HUGE replaced by 1e400: valid JSON, but past the largest
+    float, so it parses as infinity."""
+    return json.dumps(body).replace(str(HUGE), "1e400")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        design(mde_relative=HUGE),
+        design(metrics=[{"metric_key": "revenue", "role": "primary", "expected_baseline": HUGE}]),
+    ],
+    ids=["mde_relative", "expected_baseline"],
+)
+def test_a_design_number_too_big_for_a_float_is_rejected(
+    api: TestClient, admin: dict[str, str], metrics: None, body: dict[str, Any]
+) -> None:
+    # Regression: infinity passed "> 0" and was stored (and echoed back as null). The
+    # experiment could start, and then every look failed on its infinite mSPRT tau.
+    headers = admin | {"Content-Type": "application/json"}
+
+    response = api.post("/admin/experiments", content=with_1e400(body), headers=headers)
+
+    assert response.status_code == 422
+
+
+def test_a_draft_cannot_be_patched_to_an_infinite_mde(
+    api: TestClient, admin: dict[str, str], metrics: None
+) -> None:
+    api.post("/admin/experiments", json=design(), headers=admin)
+    headers = admin | {"Content-Type": "application/json"}
+
+    response = api.patch(
+        "/admin/experiments/checkout-button",
+        content=with_1e400({"mde_relative": HUGE}),
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_unknown_experiments_are_404(api: TestClient, admin: dict[str, str]) -> None:

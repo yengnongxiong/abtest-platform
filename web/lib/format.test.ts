@@ -86,6 +86,18 @@ describe("resultSentence", () => {
     expect(resultSentence(input({ comparison: comparison(none) }))).toMatch(/control's checkout conversion is zero/);
   });
 
+  test("an empty always-valid CI still reports the lift and its significance", () => {
+    // Regression: when the mSPRT's intersected CI is empty (PRD §14), only the CI is left
+    // out, but the sentence claimed the control's rate was zero.
+    const noCi = { ci_low: null, ci_high: null, rel_ci_low: null, rel_ci_high: null };
+    const sentence = resultSentence(input({ analysisType: "sequential", comparison: comparison(noCi) }));
+
+    expect(sentence).toBe(
+      "Variant B increased checkout conversion by 4.1% (no 95% always-valid CI: the checks so far " +
+        "disagree about the effect's size). This is statistically significant.",
+    );
+  });
+
   test("uses the experiment's confidence level", () => {
     expect(resultSentence(input({ alpha: 0.1 }))).toContain("(90% CI");
   });

@@ -197,6 +197,36 @@ def test_only_partitions_between_the_start_and_the_cutoff_are_read(
     assert read == {f"events_{day:%Y%m%d}" for day in (today - timedelta(days=1), today)}
 
 
+def test_rows_without_statistics_are_not_joined_by_a_nested_loop(
+    conn: psycopg.Connection, running: ExperimentToAnalyze
+) -> None:
+    # Regression: a table that has just received its first rows has no planner statistics
+    # until autovacuum analyzes it. These rows are never committed, so they never have any.
+    # Postgres then guessed a handful of events and compared every exposure with every event
+    # in a nested loop, which timed out the dashboard flow's recompute (ADR-023).
+    control = next(v.id for v in running.variants if v.is_control)
+    conn.execute(
+        "INSERT INTO exposures (project_id, experiment_id, variant_id, user_id, first_exposed_at)"
+        " SELECT %s, %s, %s, 'user-' || i, %s FROM generate_series(1, 2000) AS i",
+        (running.project_id, running.id, control, EXPOSED),
+    )
+    conn.execute(
+        "INSERT INTO events (project_id, event_id, user_id, event_name, occurred_at)"
+        " SELECT %s, gen_random_uuid(), 'user-' || i, 'purchase', %s"
+        " FROM generate_series(1, 2000, 10) AS i",
+        (running.project_id, EXPOSED + timedelta(hours=1)),
+    )
+    metric = next(m for m in running.metrics if m.key == "purchase")
+
+    rows = aggregate(conn, running, metric, NOW)
+    # In the same transaction, so the plan is made with whatever aggregate() set up.
+    params = aggregate_params(running, metric, NOW)
+    plan = conn.execute("EXPLAIN " + AGGREGATE, params).fetchall()
+
+    assert (rows[control].users, rows[control].converters) == (2000, 200)
+    assert not [line for (line,) in plan if "Nested Loop" in line]
+
+
 def events_scans(
     conn: psycopg.Connection, experiment: ExperimentToAnalyze, cutoff: datetime
 ) -> list[tuple[str, str]]:

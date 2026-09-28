@@ -203,7 +203,7 @@ Future work:
 
 - **Two kinds of API key.** Client keys ship in every web page, so they're public by design. They can only read the config and send events. Server keys unlock the admin API and travel only in the `Authorization` header, never in a URL. The database stores only a SHA-256 hash of each key, and the plaintext is shown once, at creation. A server key never works as a client key, and a client key never works as a server key.
 - **The dashboard keeps the server key on its own server.** The browser never talks to the admin API ([ADR-019](docs/decisions.md#adr-019-dashboard-auth-one-password-a-signed-cookie-and-the-server-key-kept-on-the-server-m8)).
-- **Parametrized SQL only.** Request size limits: 1 MB per request, 500 events, and 4 KB of properties per event.
+- **Parametrized SQL only.** Request limits: 1 MB per request, 500 events, 4 KB of properties per event, and event values within ±10¹².
 - **CORS** is open only on `/v1/*`, without credentials.
 - **Secrets come from environment variables.** Every value in `.env.example` is for local use only, and a deployment must replace all of them.
 - **Personal data.**

@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.10 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.11 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -195,6 +195,7 @@ POST /v1/events
 - Limits:
   - ≤ 500 events per request and ≤ 1 MB body
   - properties ≤ 4 KB per event
+  - value, when present, a finite number from −10¹² to 10¹². Attribution sums each user's values and their squares in double precision; a larger value (1e200) overflows that and makes every later look at the experiment fail.
   - user_id 1–200 characters of valid Unicode. Lone surrogates are rejected: Python cannot UTF-8-encode them, while JS silently replaces them, so the two hashes would disagree. IDs are hashed as-is, with no Unicode normalization.
   - name matches ^[A-Za-z0-9_$.:-]{1,100}$
   - occurred_at within [now − 7 days, now + 5 min]
@@ -476,6 +477,8 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.11 — health check (2026-09-28)
+- §11: an event's value must be within ±10¹² (one public event with value 1e200 made every later look at its experiment fail).
 ### v1.10 — M10 decisions (2026-09-28)
 - §22: M10 drops the hosted deployment. The project has no hosting budget, so the demo is a recording of the local stack (ADR-022).
 - §21: the demo can be a GIF or a video.
