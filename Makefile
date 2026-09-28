@@ -34,8 +34,10 @@ lint:
 	cd sdk-js && npm run lint && npm run typecheck
 	cd web && npm run lint && npm run typecheck
 
-migrate:
-	@echo "make migrate: the migration runner arrives in milestone M3 (docs/PRD.md §22)." && exit 1
+# Migrate the database in DATABASE_URL (from .env). Run from the repo root, where db/migrations is.
+migrate: .env
+	docker compose up --detach --wait db
+	uv run --project server python -m abtest.db migrate
 
 # Run from the repo root so the results land in docs/results.
 simulate:

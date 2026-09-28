@@ -20,16 +20,36 @@ services:
       timeout: 5s
       retries: 30
 
+  # One-shot: applies migrations and bootstraps (default project, API keys, partitions),
+  # then exits. The api and worker start only after it succeeds.
+  migrate:
+    build: &server-build
+      context: ./server
+      additional_contexts:
+        migrations: ./db/migrations
+    command: python -m abtest.db migrate
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ABTEST_CLIENT_KEY: ${ABTEST_CLIENT_KEY}
+      ABTEST_SERVER_KEY: ${ABTEST_SERVER_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild # a new migration: rebuild and run again
+          path: ./db/migrations
+
   api:
-    build: ./server
+    build: *server-build
     command: uvicorn --factory abtest.api.app:create_app --host 0.0.0.0 --port 8000 --reload --reload-dir src
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 5s
@@ -44,8 +64,13 @@ services:
           path: ./server/uv.lock
 
   worker:
-    build: ./server
+    build: *server-build
     command: python -m abtest.worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     develop:
       watch:
         - action: sync+restart # the worker has no reloader, so restart it

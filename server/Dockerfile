@@ -16,3 +16,7 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY src ./src
 RUN uv sync --locked --no-dev
+
+# The SQL migrations live at the repo root; docker-compose.yml passes them in as the
+# "migrations" build context. `python -m abtest.db migrate` reads ./db/migrations.
+COPY --from=migrations . ./db/migrations

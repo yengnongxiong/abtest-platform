@@ -33,7 +33,7 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make setup: install host dependencies (uv sync, npm ci for sdk-js and web)
 - make dev: docker compose up --build --watch (db, api, worker, web, demo)
 - make down: stop the stack
-- make migrate: apply SQL migrations (arrives in M3)
+- make migrate: apply SQL migrations and bootstrap (default project, API keys, event partitions) to the db container
 - make test: Python + SDK tests (starts the db container first)
 - make lint: ruff, mypy, eslint, tsc
 - make simulate: run Monte Carlo validation (about 30 s) and regenerate docs/results/

@@ -146,3 +146,76 @@ npm dependencies are saved with exact versions (`--save-exact`), and the lock fi
 - `make simulate` takes about half a minute on a laptop. The measured runtime and machine are written into `summary.md` on every run.
 - The simulated traffic is stationary and independent: no day-of-week cycles, novelty effects, or correlated users. The results say the math is right, not that real traffic is this well behaved.
 - The look schedule (a look every 1,000 users in the A/A scenarios) is part of the result: naive peeking gets worse with more looks, and the mSPRT does not.
+
+---
+
+## ADR-007: PostgreSQL alone, not a columnar store or a queue (M3)
+
+**Context.** Event ingestion and attribution are the data-heavy parts of the system. Platforms at large scale put a queue (Kafka, Kinesis) in front of ingestion and run analysis on a columnar warehouse (ClickHouse, BigQuery, Snowflake). This project runs on one machine; the PRD targets millions of events (M9 measures 1M and 10M).
+
+**Decision.** PostgreSQL 16 is the only data store. It is the source of truth for configuration, exposures, and raw events. Batches are inserted in one `INSERT ... SELECT FROM unnest(...)` statement per request (M6), the events table is range-partitioned by day (ADR-008), and results are precomputed into snapshots by the worker (M7), so no request scans events.
+
+**Alternatives considered.**
+- *A queue between the API and the database.* It absorbs bursts and decouples ingestion from storage, but adds a service to run, and the API could no longer tell the SDK "stored" or "duplicate" per event in its 202 response (PRD §11), because the write would happen later.
+- *A columnar store for events.* Much faster aggregation at billions of rows, but a second database to keep consistent with exposures and configuration, and no transactional `ON CONFLICT` for duplicate detection.
+
+**Consequences.**
+- One service to run, back up, and reason about, and transactional guarantees everywhere: an ingest batch's events and exposures commit together.
+- Throughput is bounded by one Postgres instance. M9 measures how far that goes; the numbers belong in `docs/performance.md`, not here.
+- The migration path is clear if it's ever needed: put a queue in front of the same insert code, or stream events to a columnar store and keep Postgres for configuration and exposures.
+
+---
+
+## ADR-008: Daily partitions, and the partition key in the primary key (M3)
+
+**Context.** Events arrive continuously, and every attribution query is bounded in time (events after the experiment started, PRD §13). Old events stop mattering once their experiments end.
+
+**Decision.**
+- `events` is range-partitioned by `occurred_at`, one partition per UTC day, plus a default partition. The SQL function `ensure_event_partitions(days_ahead)` creates missing partitions from today − 7 days (the API accepts events up to 7 days old) through today + `days_ahead`. The bootstrap calls it after every migration, and the worker daily (M7). It serializes callers with an advisory lock, and writes its bounds as UTC timestamps, so the session's time zone doesn't matter; a test checks both.
+- The primary key is `(project_id, event_id, occurred_at)`. Postgres requires every unique constraint on a partitioned table to include the partition key, so uniqueness is only enforced per partition.
+- Partitions are created 14 days ahead, so creating one (which briefly locks the parent table) never happens on the busy current day.
+
+**Alternatives considered.**
+- *No partitioning.* Simpler, but every attribution query would scan an ever-growing index, and deleting old events would be a slow bulk `DELETE` instead of dropping a table.
+- *A unique index on `event_id` alone.* Postgres doesn't allow one on a partitioned table. A separate dedup table keyed by `event_id` would work, at the cost of a second write for every event.
+- *Partitioning by `received_at`.* That would make the key server-controlled, but queries filter on `occurred_at`, so they would no longer skip partitions.
+
+**Consequences.**
+- **Duplicate detection depends on the client.** Two rows with the same `event_id` but different `occurred_at` are both stored. Retries are idempotent only because the SDK fixes `event_id` and `occurred_at` once, at `track()` time (PRD §12). A test pins this behavior down.
+- Time-bounded queries read only the partitions they need; a test checks the plan. M7 and M9 confirm it on the real attribution query.
+- **The default partition must stay empty.** An event for a day that has no partition lands in the default partition, and from then on Postgres refuses to create that day's partition. A test demonstrates this. With partitions 14 days ahead and the API rejecting events more than 5 minutes in the future, that only happens if the worker is down for two weeks.
+
+---
+
+## ADR-009: A separate exposures table, derived at ingest time (M3)
+
+**Context.** Attribution needs, for every user in an experiment, the variant they saw and when they first saw it (PRD §13). That could be computed from the raw `$exposure` events on every analysis, or kept up to date in its own table as events arrive.
+
+**Decision.** Keep an `exposures` table with one row per (experiment, user), updated in the same transaction as the event insert (M6). Every `$exposure` event is also stored in `events` (PRD v1.1), so there's one duplicate check and a raw audit log. Only newly inserted exposure events update `exposures`, so a retried batch never touches it twice. The upsert (`abtest/db/exposures.py`) first merges the batch per (experiment, user), because Postgres rejects an `ON CONFLICT DO UPDATE` that affects the same row twice in one statement. It then keeps the earliest time and marks the user `conflicted` if the variants differ.
+
+**Alternatives considered.** *Deriving exposures from `events` on every analysis* (`GROUP BY user` with `min(occurred_at)` over the experiment's `$exposure` events). It needs no extra table, but every snapshot re-reads every exposure event, and conflict detection would be redone on every run instead of once per event.
+
+**Consequences.**
+- Attribution joins a compact table (one row per user) instead of the raw event stream. SRM counts are a `GROUP BY variant_id` on the same table.
+- Ingestion does a second write per new exposure, in the same transaction.
+- The table is derived data: it could be rebuilt from `events` if its logic ever changes.
+
+---
+
+## ADR-010: A small migration runner of our own (M3)
+
+**Context.** The PRD calls for plain numbered SQL migrations and "a small runner" that records applied versions and runs each migration in its own transaction. The stack includes no migration library.
+
+**Decision.** One module, `abtest/db/migrate.py` (91 lines, per `wc -l`):
+- Files named `NNNN_description.sql`, applied in number order.
+- Each migration runs in its own transaction, together with the insert into `schema_migrations`, so a failed migration leaves no trace.
+- A SHA-256 checksum of each applied file is stored. If an applied file changes, the runner refuses to continue, which enforces "never edit an applied migration; add a new one".
+- Every step takes a transaction-scoped advisory lock, so concurrent runners (two containers, or parallel tests) take turns. A test starts four at once.
+
+In Docker Compose, a one-shot `migrate` service runs the migrations and the bootstrap. The `api` and `worker` services wait for it to complete successfully, and Compose Watch reruns it when a migration file is added.
+
+**Alternatives considered.** Alembic, yoyo-migrations, or sqitch. They offer more features (downgrades, dependency graphs), but each is a dependency outside the PRD's stack, and Alembic centers on SQLAlchemy models, which this project doesn't use.
+
+**Consequences.**
+- No downgrade migrations. The fix for a bad migration is a new migration that reverses it.
+- The SQL files are the whole truth about the schema, readable in any SQL tool.
