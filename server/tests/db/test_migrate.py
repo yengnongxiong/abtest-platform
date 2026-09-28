@@ -10,6 +10,8 @@ import pytest
 
 from abtest.db.migrate import MigrationError, load_migrations, migrate
 
+# Every file in db/migrations, in the order they must apply.
+ALL_MIGRATIONS = ["0001_init", "0002_covering_attribution_index"]
 EXPECTED_TABLES = {
     "projects", "api_keys", "metrics", "flags", "experiments", "variants",
     "experiment_metrics", "experiment_changes", "exposures", "events", "events_default",
@@ -31,7 +33,7 @@ def test_applies_every_migration_to_an_empty_database(
     with psycopg.connect(create_database(), autocommit=True) as conn:
         applied = migrate(conn, migrations_dir)
 
-        assert applied == ["0001_init"]
+        assert applied == ALL_MIGRATIONS
         assert tables(conn) == EXPECTED_TABLES
 
 
@@ -97,7 +99,7 @@ def test_concurrent_runners_apply_each_migration_once(
         runner.join()
 
     assert errors == []
-    assert sorted(results) == [[], [], [], ["0001_init"]]
+    assert sorted(results) == [[], [], [], ALL_MIGRATIONS]
 
 
 @pytest.mark.parametrize(

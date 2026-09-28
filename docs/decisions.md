@@ -361,7 +361,7 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - *Unique constraints on snapshots.* They would stop duplicate rows, but not two looks racing on the same previous state.
 
 **Consequences.**
-- A recompute that arrives while the worker is analyzing that experiment waits until the worker's transaction ends. At this scale that takes milliseconds: the worker's log showed a 38 ms run with one running experiment (M9 measures larger ones).
+- A recompute that arrives while the worker is analyzing that experiment waits until the worker's transaction ends. With one small experiment the worker's log showed a 38 ms run. In M9, a look at a 300,121-user experiment on 10M events took 623 ms and 873 ms in two runs (`docs/performance.md`, section 4). The experiment's lock is held until the whole job's transaction ends, so with experiments that size a recompute can wait a second or more.
 - A job's writes commit together. Inside the job, each experiment runs in a savepoint, so one experiment that fails is rolled back and logged, and the others still get their looks (a single bad experiment used to block every experiment's results).
 
 ---
@@ -378,7 +378,7 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - Page loads are a single indexed read (`results_snapshots_latest`), whatever the experiment's size.
 - Results are up to 5 minutes old; recompute exists for when that matters.
 - The stored series *is* the sequence of looks the mSPRT guarantee is about. Snapshots are never rewritten, so the history shown is the history that was analyzed.
-- Storage grows by one row per metric per 5 minutes per running experiment: about 8,000 rows per metric over four weeks. That's small, but the series endpoint would need downsampling for experiments that run for months.
+- Storage grows by one row per metric per 5 minutes per running experiment: 8,064 rows per metric over four weeks. In M9, reading those for the chart took 142 ms. Narrowing the series query to the fields the chart draws brought it to 69 ms with the same 1,915 KB response (`docs/performance.md`, section 4). The response still grows with every look, so experiments that run for months would need the series downsampled.
 
 ---
 
@@ -420,3 +420,27 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - Builds are reproducible offline, and no request goes to Google.
 - Only Latin characters are covered. Other scripts fall back to the system font.
 - Font updates are manual (rare).
+
+---
+
+## ADR-021: A covering attribution index, and a query bounded on both sides (M9)
+
+**Context.** The worker's attribution query (`AGGREGATE` in `db/results.py`) joins an experiment's exposures to the metric's events. M3 indexed events on `(project_id, event_name, user_id, occurred_at)`. M9 ran `EXPLAIN (ANALYZE, BUFFERS)` on 1M and 10M seeded events (`make seed`, `make perf`; the plans are in `docs/performance.md`, section 3). Two things showed up:
+- The query also reads `events.value` (mean metrics sum it), so every matching index entry still sent Postgres to the table. A metric's events are spread over the whole table, so for a large experiment the index barely beat reading the partitions in full: with 10M events and 300,121 exposed users, the query touched 83,746 pages with it and 98,424 without it.
+- The only constant bound on `occurred_at` was the start. The per-user upper bound (`first_exposed_at + window`) isn't a constant, so every future partition (14 of them, created ahead of time) and the default partition were scanned as well.
+
+**Decision.**
+- Migration `0002` replaces the index with `(project_id, event_name, user_id, occurred_at) INCLUDE (value)`. `INCLUDE` stores the value in the leaf entries without making it part of the sort key, so the query is answered by an index-only scan. The query counts `occurred_at` rather than `event_id`, so it reads nothing the index lacks.
+- The query also states `occurred_at < cutoff`, a constant, so Postgres prunes the partitions after it and the default partition.
+- Two tests pin these down: with every other kind of scan disabled, the query still plans as an index-only scan (so the index covers it), and it reads only the partitions between the start and the cutoff.
+
+**Alternatives considered.**
+- *Keep the M3 index.* It is what makes small experiments fast (the 5,976-user experiment: 62 ms with no index, 21 ms with it), but it does little for large ones.
+- *Raise `work_mem` for the worker.* With 300,121 users, the per-user aggregation spills to disk at the default 4 MB. A one-off trial at 64 MB removed the spill, but the time changed by less than the run-to-run noise, so the setting stays at its default.
+- *Key order `(project_id, event_name, occurred_at, user_id)`.* The time bound would become a range scan, but the per-user lookups of a nested-loop plan (which the planner chose for the small experiment with the 0001 index) would lose their key order. Not measured.
+
+**Consequences.**
+- The large experiment's query touches 12,138 pages instead of 83,746, and its median time fell from 372 ms to 299 ms (warm cache, 10M events). The small experiment's stayed at about 20 ms.
+- The index is larger: each entry carries an 8-byte value, and every insert writes it. At 10M events the covering index (1,285 MB) is as large as the table's rows (1,282 MB). `docs/performance.md` explains why its measured sizes can't isolate the extra column's cost.
+- Index-only scans skip the table only for pages the visibility map marks all-visible, so they rely on autovacuum keeping up. Postgres 13+ vacuums insert-only tables, and pages that aren't marked yet are simply read from the table.
+- Postgres can't build an index on a partitioned table `CONCURRENTLY`, so migration `0002` blocks writes to events while it runs. On a large live table you would build each partition's index concurrently and attach it.

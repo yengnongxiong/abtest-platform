@@ -1,12 +1,18 @@
 """The attribution query's edge cases, with hand-built fixtures (PRD §13)."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 
-from abtest.db.results import ExperimentToAnalyze, aggregate, experiment_to_analyze
+from abtest.db.results import (
+    AGGREGATE,
+    ExperimentToAnalyze,
+    aggregate,
+    aggregate_params,
+    experiment_to_analyze,
+)
 
 STARTED = datetime(2026, 9, 1, tzinfo=UTC)
 EXPOSED = STARTED + timedelta(hours=1)  # every user's first exposure
@@ -156,3 +162,52 @@ def test_a_mean_metric_sums_per_user_with_zeros_and_nulls(
     # Per-user totals are 15, 0, 0: n = 3, sum = 15, sum of squares = 225.
     assert (users, total, total_sq) == (3, 15.0, 225.0)
     assert converters == 2  # users with any purchase event
+
+
+def test_the_query_can_be_answered_from_the_index_alone(
+    conn: psycopg.Connection, running: ExperimentToAnalyze
+) -> None:
+    # Every events column the query reads is in events_attribution, so Postgres can skip the
+    # table and read only the index (docs/performance.md). With every other kind of scan
+    # switched off, an index-only scan is the only plan left, and it exists only if the
+    # index covers the query.
+    conn.execute("SET LOCAL enable_seqscan = off")
+    conn.execute("SET LOCAL enable_bitmapscan = off")
+    conn.execute("SET LOCAL enable_indexscan = off")
+
+    scans = events_scans(conn, running, NOW)
+
+    assert scans
+    assert {node_type for node_type, _ in scans} == {"Index Only Scan"}
+
+
+def test_only_partitions_between_the_start_and_the_cutoff_are_read(
+    conn: psycopg.Connection, running: ExperimentToAnalyze
+) -> None:
+    # The query bounds occurred_at by constants on both sides, so Postgres skips every daily
+    # partition before the start and after the cutoff, and the default partition.
+    conn.execute("SELECT ensure_event_partitions(3)")
+    today = datetime.now(UTC).date()
+    started = datetime.combine(today - timedelta(days=1), time(12), tzinfo=UTC)
+    experiment = running.model_copy(update={"started_at": started})
+
+    scans = events_scans(conn, experiment, cutoff=started + timedelta(days=1))
+
+    read = {partition for _, partition in scans}
+    assert read == {f"events_{day:%Y%m%d}" for day in (today - timedelta(days=1), today)}
+
+
+def events_scans(
+    conn: psycopg.Connection, experiment: ExperimentToAnalyze, cutoff: datetime
+) -> list[tuple[str, str]]:
+    """(node type, table) of every scan of an events partition in the query's plan."""
+    params = aggregate_params(experiment, experiment.metrics[0], cutoff)
+    row = conn.execute("EXPLAIN (FORMAT JSON) " + AGGREGATE, params).fetchone()
+    assert row is not None
+    scans, nodes = [], [row[0][0]["Plan"]]
+    while nodes:
+        node = nodes.pop()
+        nodes.extend(node.get("Plans", []))
+        if node.get("Relation Name", "").startswith("events"):
+            scans.append((node["Node Type"], node["Relation Name"]))
+    return scans

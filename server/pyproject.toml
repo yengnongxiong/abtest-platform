@@ -20,6 +20,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "locust>=2.46.6",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
@@ -42,7 +43,9 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests", "scripts"]
+# loadtest/ holds the performance scripts (PRD §7); its modules import each other by name.
+files = ["src", "tests", "scripts", "../loadtest"]
+mypy_path = "../loadtest"
 plugins = ["pydantic.mypy"]
 
 # statsmodels ships no type information. It is a test-only dependency, used to cross-check
@@ -53,4 +56,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-ra", "--strict-markers"]
+# ../loadtest: tests import the load-test scripts' modules. "no:locust": Locust (a dev
+# dependency for the load test) registers a pytest plugin that these tests don't use.
+pythonpath = ["../loadtest"]
+addopts = ["-ra", "--strict-markers", "-p", "no:locust"]

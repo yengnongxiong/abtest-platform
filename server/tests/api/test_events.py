@@ -1,6 +1,7 @@
 """POST /v1/events: validation, duplicates, exposures, limits (PRD §10, §11)."""
 
 import json
+import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -8,6 +9,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from workload import LARGE, batch_events
 
 from abtest.api.app import create_app
 from abtest.assignment import WeightedVariant, assign, in_experiment
@@ -317,3 +319,22 @@ def test_the_rate_limit_returns_429_with_retry_after(
     assert [r.status_code for r in responses] == [202, 202, 429]
     assert responses[2].headers["Retry-After"] == "1"
     assert responses[2].json()["error"]["code"] == "rate_limited"
+
+
+def test_a_load_test_batch_is_stored_in_full(
+    api: TestClient,
+    admin: dict[str, str],
+    sdk: dict[str, str],
+    new_project: tuple[UUID, str, str],
+    api_database: str,
+) -> None:
+    # loadtest/locustfile.py counts a batch as failed unless every event is stored, so its
+    # batches must be valid, and its exposures must match the server's own assignment.
+    start(api, admin, key=LARGE.key)
+
+    result = send(api, sdk, batch_events(50, datetime.now(UTC), random.Random(1)))
+
+    assert result == {"accepted": 50, "duplicates": 0, "rejected": []}
+    recorded = exposures(api_database, new_project[0])
+    assert recorded
+    assert not any(mismatch for *_, mismatch in recorded)

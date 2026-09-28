@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.8 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.9 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -155,7 +155,7 @@ Required rules and SQL:
   - The default partition should stay empty. Postgres refuses to create a daily partition while the default partition holds rows that belong to that day.
 - The events PK includes occurred_at because unique constraints on a partitioned table must include the partition key. Document the consequence in decisions.md: retries are idempotent only because the SDK creates event_id and occurred_at once, at track() time.
 - Indexes:
-  - events (project_id, event_name, user_id, occurred_at)
+  - events (project_id, event_name, user_id, occurred_at) INCLUDE (value): covering, so attribution reads only the index (M9, docs/performance.md)
   - results_snapshots (experiment_id, metric_id, computed_at DESC)
   - an index on every foreign key
   - Comment each index with the query it serves.
@@ -269,7 +269,7 @@ For experiment E, metric M, and analysis cutoff T (now, or stopped_at if stopped
 - Conversion metric: a user converts if they have ≥ 1 event named M.event_name with first_exposed_at ≤ occurred_at < min(first_exposed_at + window, T).
 - Mean metric: the per-user sum of value over the same window (0 if the user has no events; a null value counts as 0). Aggregate n, sum, and sum of squares per variant.
 - SRM uses the same population as the analysis: non-conflicted exposures.
-- Queries must include occurred_at ≥ E.started_at so Postgres prunes old partitions. Verify this with EXPLAIN.
+- Queries must include occurred_at ≥ E.started_at and occurred_at < T so Postgres prunes the partitions outside them. Verify this with EXPLAIN.
 - Known limitation: recently exposed users have had less time to convert. The MVP accepts this and documents it in decisions.md; analyzing only users whose full window has elapsed is a stretch goal.
 - Known limitation: occurred_at comes from the client's clock. A client whose clock runs behind can produce events that fall before started_at or outside the window. Document this; don't correct for it.
 - Tests with hand-built fixtures must cover:
@@ -475,6 +475,10 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.9 — M9 decisions (2026-09-28)
+- §10: the attribution index adds INCLUDE (value), so the attribution query is an index-only scan (migration 0002, ADR-021).
+- §13: the attribution query also bounds occurred_at < T, so partitions after the cutoff (and the default partition) are pruned.
+- §18: the measurements run on a separate database (abtest_perf) seeded by `make seed`; `make perf` and `make loadtest` produce every number in docs/performance.md.
 ### v1.8 — M8 decisions (2026-09-28)
 - §11: GET /admin/experiments includes latest_results for each experiment.
 - §16B: the traffic generator's `--use-running` option, so the dashboard flow (create → start → run scenario → read results) can use it.

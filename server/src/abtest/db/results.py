@@ -76,12 +76,16 @@ FROM experiments e
 
 # One row per variant: the metric aggregated over the experiment's non-conflicted users.
 # Each user's events count only inside [first exposure, first exposure + window), and never
-# after the cutoff (now, or when the experiment stopped). The bound on started_at is implied
-# by the others, but stating it lets Postgres skip every partition from before the start.
+# after the cutoff (now, or when the experiment stopped).
+# - The constant bounds (started_at, and the cutoff on its own) are implied by the others,
+#   but stating them lets Postgres skip every partition outside them.
+# - Every events column read here is in the events_attribution index, so Postgres can read
+#   the index alone (an index-only scan). That's why it counts occurred_at, not event_id:
+#   either is NULL when the LEFT JOIN finds no event.
 AGGREGATE = """
 WITH per_user AS (
     SELECT x.variant_id,
-           count(ev.event_id) AS events,
+           count(ev.occurred_at) AS events,
            coalesce(sum(ev.value), 0) AS total
     FROM exposures x
     LEFT JOIN events ev
@@ -89,6 +93,7 @@ WITH per_user AS (
        AND ev.event_name = %(event_name)s
        AND ev.user_id = x.user_id
        AND ev.occurred_at >= %(started_at)s
+       AND ev.occurred_at < %(cutoff)s
        AND ev.occurred_at >= x.first_exposed_at
        AND ev.occurred_at < least(x.first_exposed_at + %(window)s, %(cutoff)s)
     WHERE x.experiment_id = %(experiment_id)s AND NOT x.conflicted
@@ -143,23 +148,28 @@ def lock_experiment(conn: psycopg.Connection, experiment_id: UUID) -> datetime:
     return now
 
 
+def aggregate_params(
+    experiment: ExperimentToAnalyze, metric: MetricToAnalyze, cutoff: datetime
+) -> dict[str, object]:
+    """AGGREGATE's parameters. Separate, so loadtest/explain_attribution.py can EXPLAIN
+    exactly the query the worker runs."""
+    return {
+        "project_id": experiment.project_id,
+        "experiment_id": experiment.id,
+        "event_name": metric.event_name,
+        "started_at": experiment.started_at,
+        "window": timedelta(hours=metric.window_hours),
+        "cutoff": cutoff,
+    }
+
+
 def aggregate(
     conn: psycopg.Connection,
     experiment: ExperimentToAnalyze,
     metric: MetricToAnalyze,
     cutoff: datetime,
 ) -> dict[UUID, VariantAggregate]:
-    rows = conn.execute(
-        AGGREGATE,
-        {
-            "project_id": experiment.project_id,
-            "experiment_id": experiment.id,
-            "event_name": metric.event_name,
-            "started_at": experiment.started_at,
-            "window": timedelta(hours=metric.window_hours),
-            "cutoff": cutoff,
-        },
-    ).fetchall()
+    rows = conn.execute(AGGREGATE, aggregate_params(experiment, metric, cutoff)).fetchall()
     return {
         variant_id: VariantAggregate(
             users=users, converters=converters, total=total, total_sq=total_sq
@@ -209,23 +219,32 @@ def insert_snapshot(
 def snapshot_history(
     conn: psycopg.Connection, experiment_id: UUID, metric_id: UUID
 ) -> tuple[Snapshot | None, list[SeriesPoint]]:
-    """The latest snapshot in full, and every snapshot compactly, oldest first."""
-    rows = conn.execute(
-        "SELECT computed_at, data FROM results_snapshots"
-        " WHERE experiment_id = %s AND metric_id = %s ORDER BY computed_at, id",
+    """The latest snapshot in full, and every snapshot compactly, oldest first.
+
+    The series reads only the columns and the part of `data` the chart needs, not every
+    look's whole `data`: four weeks of looks every 5 minutes are 8,064 rows
+    (docs/performance.md measures it).
+    """
+    latest_row = conn.execute(
+        "SELECT id, computed_at, data FROM results_snapshots"
+        " WHERE experiment_id = %s AND metric_id = %s ORDER BY computed_at DESC, id DESC LIMIT 1",
         (experiment_id, metric_id),
+    ).fetchone()
+    if latest_row is None:
+        return None, []
+    latest_id, latest_at, data = latest_row
+    latest = Snapshot(computed_at=latest_at, data=SnapshotData.model_validate(data))
+    # Ends at that same snapshot, even if the worker adds a look between the two queries.
+    rows = conn.execute(
+        "SELECT computed_at, total_users, srm_flag, data->'comparisons' FROM results_snapshots"
+        " WHERE experiment_id = %s AND metric_id = %s AND (computed_at, id) <= (%s, %s)"
+        " ORDER BY computed_at, id",
+        (experiment_id, metric_id, latest_at, latest_id),
     ).fetchall()
     series = [
         SeriesPoint(
-            computed_at=computed_at,
-            users=data["users"],
-            srm_flagged=data["srm"]["flagged"],
-            comparisons=data["comparisons"],
+            computed_at=computed_at, users=users, srm_flagged=srm_flagged, comparisons=comparisons
         )
-        for computed_at, data in rows
+        for computed_at, users, srm_flagged, comparisons in rows
     ]
-    latest = None
-    if rows:
-        computed_at, data = rows[-1]
-        latest = Snapshot(computed_at=computed_at, data=SnapshotData.model_validate(data))
     return latest, series

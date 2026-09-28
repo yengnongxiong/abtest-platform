@@ -90,7 +90,17 @@ def test_recompute_then_read_the_results(
     [comparison] = latest["comparisons"]
     assert comparison["variant_key"] == "treatment"
     assert comparison["msprt_state"] is not None
-    assert len(results["series"]) == 1
+    # The series point is the same look, cut down to what the chart draws.
+    [point] = results["series"]
+    assert point == {
+        "computed_at": results["latest"]["computed_at"],
+        "users": latest["users"],
+        "srm_flagged": latest["srm"]["flagged"],
+        "comparisons": [
+            {key: comparison[key]
+             for key in ("variant_key", "rel_lift", "rel_ci_low", "rel_ci_high", "p_value")}
+        ],
+    }  # fmt: skip
 
 
 def test_every_recompute_adds_a_look_and_never_rewrites_one(

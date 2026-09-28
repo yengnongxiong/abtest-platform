@@ -41,6 +41,9 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make lint: ruff, mypy, eslint, tsc
 - make simulate: run Monte Carlo validation (about 30 s) and regenerate docs/results/
 - make traffic SCENARIO=checkout_button: simulated users through the running stack (scenarios/*.yaml), then print the results. ARGS="--use-running --experiment-key <key>" feeds an experiment created and started in the dashboard
+- make seed EVENTS=10000000: recreate the separate abtest_perf database and fill it with that many events via COPY (10M took 3.5 minutes on the M9 machine)
+- make perf: on abtest_perf, EXPLAIN of the attribution query with and without its index, a worker look and the results read, then row-by-row vs batch inserts
+- make loadtest LOADTEST_USERS=32 LOADTEST_WORKERS=1: Locust against an API on abtest_perf (no --reload, rate limit raised) for LOADTEST_TIME (60s)
 
 ## Local environment
 - Docker runs via Colima (`colima start` after a reboot). Node 24 via Homebrew (node@24).
