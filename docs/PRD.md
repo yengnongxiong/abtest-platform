@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.9 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.10 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -408,7 +408,7 @@ Style: clean, responsive, and accessible. Tailwind; no heavy component library.
 ## 21. Documentation deliverables
 README.md, containing:
 - a one-paragraph pitch
-- a demo GIF (placeholder until I record it)
+- a demo GIF or video, recorded from the local stack (placeholder until I record it)
 - the Mermaid architecture diagram
 - how it works: assignment, ingestion, attribution, statistics
 - validation results (charts plus the summary table)
@@ -462,8 +462,9 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
   - Accept: the full flow works in the browser: create metric → create experiment → start → run scenario → read results. The SRM banner appears for srm_bug.
 - M9 Performance (§18).
   - Accept: docs/performance.md contains real numbers and EXPLAIN output.
-- M10 Docs and deploy (§21).
-  - Accept: the README is complete; the quickstart is verified from a fresh clone; the app is deployed (I'll choose the provider).
+- M10 Docs (§21).
+  - Accept: the README is complete; the quickstart is verified from a fresh clone.
+  - No hosted deployment (v1.10, ADR-022): the demo is a recording of the local stack, which I make and add to the README.
 
 ## 23. Stretch goals
 - CUPED
@@ -475,6 +476,9 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.10 — M10 decisions (2026-09-28)
+- §22: M10 drops the hosted deployment. The project has no hosting budget, so the demo is a recording of the local stack (ADR-022).
+- §21: the demo can be a GIF or a video.
 ### v1.9 — M9 decisions (2026-09-28)
 - §10: the attribution index adds INCLUDE (value), so the attribution query is an index-only scan (migration 0002, ADR-021).
 - §13: the attribution query also bounds occurred_at < T, so partitions after the cutoff (and the default partition) are pruned.

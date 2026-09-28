@@ -444,3 +444,31 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - The index is larger: each entry carries an 8-byte value, and every insert writes it. At 10M events the covering index (1,285 MB) is as large as the table's rows (1,282 MB). `docs/performance.md` explains why its measured sizes can't isolate the extra column's cost.
 - Index-only scans skip the table only for pages the visibility map marks all-visible, so they rely on autovacuum keeping up. Postgres 13+ vacuums insert-only tables, and pages that aren't marked yet are simply read from the table.
 - Postgres can't build an index on a partitioned table `CONCURRENTLY`, so migration `0002` blocks writes to events while it runs. On a large live table you would build each partition's index concurrently and attach it.
+
+---
+
+## ADR-022: No hosted deployment: the local stack is the demo (M10)
+
+**Context.** PRD v1.9 ended M10 with a deployment, with the provider still to be chosen. The system is five long-running services: Postgres, the API, the worker, the dashboard, and the demo page. The worker has to run all the time, because it computes every result and creates each day's event partitions. The project has no budget for hosting. The dashboard also sits behind the single admin password (ADR-019), so a visitor to a live URL would see only the sign-in page, and sharing the password would give them full admin rights, since there is only one role.
+
+**Decision.**
+- Don't deploy (PRD v1.10).
+- Show the system working in three ways:
+  - a recording of the full flow on the local stack, in the README;
+  - the one-command quickstart (`make dev`), verified from a fresh clone in M10;
+  - CI's compose smoke test, which builds and starts every service on every push.
+
+**Alternatives considered.**
+- *A paid host*: a small virtual server running this compose file behind a reverse proxy for HTTPS, or a platform that runs each Dockerfile (Railway, Fly.io, Render). This is the real way to ship it, but it's a monthly cost for a portfolio project.
+- *Free tiers.* The platforms' free plans generally put idle services to sleep, or don't offer always-on background workers, and the worker is the part that must never sleep.
+- *A static site with recorded data* (the demo page and a read-only dashboard served from files). This is free, but it's a second, fake version of the app that would have to be kept in sync with the real one.
+
+**Consequences.**
+- The images stay development images. Compose runs `uvicorn --reload` and `next dev`, as root inside the containers, with the local-only secrets from `.env.example`.
+- A deployment would need:
+  - production images: `next build` and `next start`, uvicorn without `--reload`, a non-root user, and no matplotlib in the API image;
+  - new API keys (PRD §10), a new `SESSION_SECRET`, and a long random `ADMIN_PASSWORD` (ADR-019 has no sign-in rate limit);
+  - HTTPS in front of the API and the dashboard, and a place for the demo page.
+
+  The README lists this as future work.
+- Nobody can click a live link. The recording and the quickstart have to do that job.
