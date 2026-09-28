@@ -362,7 +362,7 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 
 **Consequences.**
 - A recompute that arrives while the worker is analyzing that experiment waits until the worker's transaction ends. At this scale that takes milliseconds: the worker's log showed a 38 ms run with one running experiment (M9 measures larger ones).
-- A job's writes all commit together or not at all.
+- A job's writes commit together. Inside the job, each experiment runs in a savepoint, so one experiment that fails is rolled back and logged, and the others still get their looks (a single bad experiment used to block every experiment's results).
 
 ---
 

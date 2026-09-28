@@ -12,7 +12,10 @@ import psycopg
 import pytest
 
 from abtest.db.migrate import migrate
+from abtest.db.results import ExperimentToAnalyze
 from abtest.logs import JSONFormatter
+from abtest.results import compute_snapshots
+from abtest.worker import jobs
 from abtest.worker.jobs import (
     PARTITIONS_LOCK_ID,
     RESULTS_LOCK_ID,
@@ -100,7 +103,12 @@ def conversions(snapshot: dict[str, Any], variant: str) -> int:
 def test_each_run_adds_a_look_at_every_running_experiment(conn: psycopg.Connection) -> None:
     experiment = started_experiment(conn)
 
-    assert compute_results(conn) == {"experiments": 1, "snapshots": 1, "exposure_rows": 40}
+    assert compute_results(conn) == {
+        "experiments": 1,
+        "snapshots": 1,
+        "exposure_rows": 40,
+        "failed": [],
+    }
     compute_results(conn)
 
     looks = snapshots(conn, experiment)
@@ -122,6 +130,26 @@ def test_a_stopped_experiment_gets_one_final_look_up_to_the_stop(conn: psycopg.C
     ).fetchone()
     assert stopped_at is not None
     assert datetime.fromisoformat(final["cutoff"]) == stopped_at[0]
+
+
+def test_one_failing_experiment_does_not_block_the_others(
+    conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken, healthy = started_experiment(conn), started_experiment(conn)
+
+    def fail_after_writing(conn: psycopg.Connection, experiment: ExperimentToAnalyze) -> int:
+        rows = compute_snapshots(conn, experiment)
+        if experiment.id == broken:
+            raise RuntimeError("a bug in one experiment's analysis")
+        return rows
+
+    monkeypatch.setattr(jobs, "compute_snapshots", fail_after_writing)
+    outcome = compute_results(conn)
+
+    assert outcome["failed"] == [str(broken)]
+    assert outcome["snapshots"] == 1
+    assert snapshots(conn, broken) == []  # its partial work was rolled back
+    assert len(snapshots(conn, healthy)) == 1
 
 
 @pytest.mark.parametrize(

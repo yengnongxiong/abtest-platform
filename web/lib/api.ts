@@ -80,8 +80,6 @@ export const api = {
     request<ExperimentDetail>("POST", `/admin/experiments/${path(key)}/stop`, { reason }),
   cloneExperiment: (key: string, newKey: string) =>
     request<ExperimentDetail>("POST", `/admin/experiments/${path(key)}/clone`, { new_key: newKey }),
-  updateExperiment: (key: string, body: unknown) =>
-    request<ExperimentDetail>("PATCH", `/admin/experiments/${path(key)}`, body),
   results: (key: string, metric: string) =>
     request<Results>(
       "GET",
@@ -92,8 +90,6 @@ export const api = {
 
   listMetrics: () => request<Metric[]>("GET", "/admin/metrics"),
   createMetric: (body: unknown) => request<Metric>("POST", "/admin/metrics", body),
-  updateMetric: (key: string, body: unknown) =>
-    request<Metric>("PATCH", `/admin/metrics/${path(key)}`, body),
 
   listFlags: () => request<Flag[]>("GET", "/admin/flags"),
   createFlag: (body: unknown) => request<Flag>("POST", "/admin/flags", body),
