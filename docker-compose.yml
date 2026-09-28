@@ -1,0 +1,95 @@
+# Local development stack. `make dev` runs `docker compose up --build --watch`:
+# Compose Watch copies source changes into the running containers (see develop.watch),
+# so nothing is bind-mounted and the stack behaves the same on any Docker runtime.
+name: abtest
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build: ./server
+    command: uvicorn --factory abtest.api.app:create_app --host 0.0.0.0 --port 8000 --reload --reload-dir src
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    develop:
+      watch:
+        - action: sync # uvicorn --reload picks up the change
+          path: ./server/src
+          target: /app/src
+        - action: rebuild # dependencies changed
+          path: ./server/uv.lock
+
+  worker:
+    build: ./server
+    command: python -m abtest.worker
+    develop:
+      watch:
+        - action: sync+restart # the worker has no reloader, so restart it
+          path: ./server/src
+          target: /app/src
+        - action: rebuild # dependencies changed
+          path: ./server/uv.lock
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 30s
+      retries: 20
+    develop:
+      watch:
+        - action: sync # next dev hot-reloads
+          path: ./web
+          target: /app
+          ignore:
+            - node_modules/
+            - .next/
+        - action: rebuild # dependencies changed
+          path: ./web/package-lock.json
+
+  demo:
+    build: ./demo
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    develop:
+      watch:
+        - action: sync
+          path: ./demo
+          target: /usr/share/nginx/html
+          ignore:
+            - Dockerfile
+
+volumes:
+  pgdata:

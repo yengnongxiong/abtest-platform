@@ -1,0 +1,23 @@
+# Local settings and secrets (see .env.example)
+.env
+
+# Local milestone reports; never published
+notes/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+coverage/
+
+# OS
+.DS_Store
