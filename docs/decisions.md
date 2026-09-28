@@ -69,5 +69,5 @@ npm dependencies are saved with exact versions (`--save-exact`), and the lock fi
 
 **Consequences.**
 - tsup has already cost us one workaround. Its declaration build always sets `baseUrl`, which TypeScript 6 deprecates, so `tsup.config.ts` silences that one deprecation for the declaration step only. Moving to TypeScript 7 will mean replacing tsup, most likely with tsdown.
-- Starlette 1.7 prints a deprecation warning suggesting `httpx2` instead of `httpx` for its test client. We stay on `httpx`, which the PRD lists and which still works, until a switch is approved.
+- Starlette 1.7 deprecates `httpx` for its test client in favor of `httpx2`, httpx's maintained successor (same author, now under the Pydantic org; httpx's last release was December 2024). We switched to `httpx2` after M0, with approval (PRD v1.2).
 - Revisit Node when 26 becomes LTS (2026-10-28), and TypeScript when typescript-eslint supports 7.

@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.1 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.2 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -90,7 +90,7 @@ abtest-platform/
 ```
 
 ## 8. Tech stack (ask before adding anything else)
-- Python 3.12+ with: uv, FastAPI, Pydantic v2, pydantic-settings, psycopg 3 + psycopg_pool, mmh3, NumPy, SciPy, matplotlib, PyYAML, httpx, pytest, ruff, mypy. statsmodels is a test-only dependency, used for cross-checking.
+- Python 3.12+ with: uv, FastAPI, Pydantic v2, pydantic-settings, psycopg 3 + psycopg_pool, mmh3, NumPy, SciPy, matplotlib, PyYAML, httpx2, pytest, ruff, mypy. statsmodels is a test-only dependency, used for cross-checking.
 - TypeScript SDK: tsup, vitest. The SDK has zero runtime dependencies.
 - Web: Next.js (App Router), TypeScript, Tailwind CSS, Recharts.
 - Infrastructure and tooling: PostgreSQL 16, Docker Compose, GitHub Actions, Locust.
@@ -99,6 +99,7 @@ abtest-platform/
   - ESLint, typescript-eslint, @eslint/js: dev-only, for SDK linting.
   - nginx (Docker image): serves the static demo page.
   - scipy-stubs, types-PyYAML: dev-only type stubs for mypy strict.
+- Approved change (v1.2): httpx2 replaces httpx. It is httpx's maintained successor (same author, now under the Pydantic org); httpx's last release was 0.28.1 in December 2024, and Starlette's test client deprecates it.
 - Use current stable versions; look them up rather than guessing. Chosen versions and pins are recorded in docs/decisions.md.
 
 ## 9. Assignment
@@ -459,6 +460,10 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.2 — after M0 (2026-09-28)
+- §8: httpx2 replaces httpx (approved).
+- Repo: MIT license (approved).
+
 ### v1.1 — kickoff review (2026-09-27)
 Resolutions agreed at the project kickoff. Each change is written into the section named.
 - §8: approved uvicorn, ESLint + typescript-eslint + @eslint/js, nginx (demo), scipy-stubs, types-PyYAML.

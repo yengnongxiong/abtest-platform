@@ -35,3 +35,7 @@ Host-side tools: [uv](https://docs.astral.sh/uv/) and Node 24 (see `.nvmrc`).
 | `make down` | Stop the stack |
 
 Design decisions and their trade-offs are recorded in [docs/decisions.md](docs/decisions.md).
+
+## License
+
+[MIT](LICENSE)
