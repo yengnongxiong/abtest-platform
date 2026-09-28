@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.3 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.4 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -214,14 +214,17 @@ Admin endpoints (Authorization: Bearer <server key>):
   - Definition fields (event_name, kind, direction, window_hours) can be edited only while no started experiment uses the metric. Otherwise existing results would change retroactively.
 - Flags: POST /admin/flags, GET /admin/flags, and GET/PATCH/DELETE /admin/flags/{key}.
 - Experiments: POST /admin/experiments, GET /admin/experiments, and GET/PATCH /admin/experiments/{key}.
-  - PATCH on a running experiment may only raise traffic_bp or edit the name.
+  - PATCH on a running experiment may only raise traffic_bp or edit the name. A stopped experiment may only be renamed. In PATCH bodies, a missing or null field means unchanged.
 - API keys: GET /admin/api-keys, POST /admin/api-keys (returns the plaintext key once), POST /admin/api-keys/{id}/revoke.
+  - The project's last active server key can't be revoked (409), which would lock everyone out of the admin API.
+  - A server key never works as a client key, and a client key never works as a server key.
 - POST /admin/experiments/{key}/start validates that the experiment has:
   - a hypothesis
   - ≥ 2 variants, with exactly one control
   - weights summing to 10000
   - exactly one primary metric
-  - mde_relative set, and an expected_baseline for every attached metric
+  - mde_relative set, and an expected_baseline for every attached metric (below 1 for a conversion metric, because it is a rate)
+  - A start that fails lists every problem at once (error details.problems).
 - POST /admin/experiments/{key}/stop {reason}
 - POST /admin/experiments/{key}/clone {new_key}
 - GET /admin/experiments/{key}/results?metric=<key>: the latest snapshot plus the time series of snapshots.
@@ -438,13 +441,13 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
   - Accept: the A/A FPR falls inside the expected band; the sequential FPR is ≤ α within Monte Carlo error; the charts and summary.md are generated from a real run.
 - M3 Database (§10).
   - Accept: migrations apply on an empty DB; the runner is idempotent; tests cover the constraints, the partition function, and the exposure upsert.
-- M4 Assignment, admin API, and config endpoint (§9, §11).
+- M4 Assignment, admin API, and config endpoint (§9, §11). The results and recompute endpoints come with M7, because they read and write the worker's snapshots.
   - Accept: the hash vectors pass; the uniformity test passes; the lifecycle rules are enforced and tested; ETag/304 works; config_version bumps on changes.
 - M5 SDK and demo page (§12).
   - Accept: vitest passes (vectors, batching, retry/backoff, exposure dedupe, beacon path); bundle size is measured; the demo works against the local API.
 - M6 Ingestion (§11 events, §10 rules).
   - Accept: duplicates are counted, not inserted; rejected events come back with reasons; exposures keep the earliest time; conflicts and mismatches are flagged; the rate limit returns 429.
-- M7 Worker, attribution, and traffic generator (§13, §15, §16B).
+- M7 Worker, attribution, and traffic generator (§13, §15, §16B), plus GET /admin/experiments/{key}/results and POST /admin/experiments/{key}/recompute.
   - Accept: the attribution edge-case tests pass; the checkout_button CI contains the true lift; the srm_bug scenario is flagged.
 - M8 Dashboard (§17).
   - Accept: the full flow works in the browser: create metric → create experiment → start → run scenario → read results. The SRM banner appears for srm_bug.
@@ -463,6 +466,11 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.4 — M3 and M4 decisions (2026-09-28)
+- §10: variant keys follow the same format as other keys; weight_bp ≥ 1 (the SRM check needs positive shares); expected_baseline > 0.
+- §11: last-server-key guard; keys never cross kinds; stopped experiments can only be renamed; null in PATCH means unchanged; conversion baselines below 1; start errors list every problem.
+- §22: the results and recompute endpoints move from M4 to M7, where snapshots exist.
+
 ### v1.3 — M1 stats engine (2026-09-28)
 Edge cases the engine had to decide; each is written into §14.
 - ComparisonResult carries insufficient_data (the reason), and the verdict gains insufficient_data.

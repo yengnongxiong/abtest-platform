@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.141.1",
     "matplotlib>=3.11.2",
+    "mmh3>=5.3.0",
     "numpy>=2.5.3",
     "psycopg-pool>=3.3.3",
     "psycopg[binary]>=3.3.6",
@@ -39,7 +40,7 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 plugins = ["pydantic.mypy"]
 
 # statsmodels ships no type information. It is a test-only dependency, used to cross-check

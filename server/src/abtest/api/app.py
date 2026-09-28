@@ -10,7 +10,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from abtest.api.routers import health
+from abtest.api.cors import PublicCORS
+from abtest.api.errors import install_error_handlers
+from abtest.api.routers import api_keys, config, experiments, flags, health, metrics, sample_size
 from abtest.config import Settings
 from abtest.db.pool import create_pool
 
@@ -30,5 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pool.close()
 
     app = FastAPI(title="abtest-platform API", lifespan=lifespan)
-    app.include_router(health.router)
+    app.add_middleware(PublicCORS)
+    install_error_handlers(app)
+    for module in (health, config, metrics, flags, experiments, api_keys, sample_size):
+        app.include_router(module.router)
     return app

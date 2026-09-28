@@ -219,3 +219,58 @@ In Docker Compose, a one-shot `migrate` service runs the migrations and the boot
 **Consequences.**
 - No downgrade migrations. The fix for a bad migration is a new migration that reverses it.
 - The SQL files are the whole truth about the schema, readable in any SQL tool.
+
+---
+
+## ADR-011: Flags and experiments are evaluated in the SDK, not on the server (M4)
+
+**Context.** Every page view asks "is this flag on for this user?" and "which variant does this user get?". Those answers can come from a server call per evaluation, or from rules the SDK downloads once and applies locally.
+
+**Decision.** The SDK downloads the whole project config (`GET /v1/config`: running experiments with their variants and weights, and every flag) and evaluates locally, with deterministic hashing (`abtest/assignment.py`, ported byte for byte to TypeScript in M5). The server recomputes each exposure's assignment at ingestion (M6), so an SDK that disagrees is flagged (`assignment_mismatch`) instead of silently trusted.
+
+**Alternatives considered.** *Server-side evaluation* (`GET /v1/decide?user=...`). The server always has the latest rules, and the rules stay private, but every evaluation costs a network round trip on the page's critical path, and an outage or a slow network breaks the page, which is exactly what PRD goal G1 ("zero network calls at evaluation time") rules out.
+
+**Consequences.**
+- Evaluation is instant and works offline once the config is cached. A change reaches browsers within one poll interval (30 s by default).
+- The config is public: anyone with the (public) client key can read flag names, rollout percentages, and experiment keys. Nothing secret may go in a flag or experiment key.
+- Two implementations of the same hashing must never drift. `shared/hash_test_vectors.json` (57 hash, 45 assignment, and 27 flag vectors, including every MurmurHash3 tail length and multi-byte UTF-8 at block boundaries) is checked by both test suites. The Python side is anchored to published MurmurHash3 reference values.
+
+---
+
+## ADR-012: Two independent hashes: one for inclusion, one for the variant (M4)
+
+**Context.** An experiment usually starts on a slice of traffic (say 10%) and ramps up. Ramping must never move a user who is already in the experiment to another variant: their earlier behavior would then count for the wrong variant.
+
+**Decision.** Inclusion and variant choice hash different inputs:
+- `in experiment` ⇔ bucket(`{key}:traffic:{user}`) < traffic_bp;
+- the variant comes from bucket(`{key}:variant:{user}`), walked through the cumulative weights in position order.
+
+Raising `traffic_bp` only admits users whose traffic bucket falls in the new range; everyone already in keeps the same variant bucket and therefore the same variant. Traffic may only increase while an experiment runs (lowering it would drop users), and weights are frozen once it starts.
+
+**Alternatives considered.** *One hash for both* (for example: bucket < traffic_bp means included, and the same bucket, rescaled, picks the variant). Changing traffic_bp then changes the rescaling, and users move between variants when traffic ramps.
+
+**Consequences.**
+- Proven by tests: raising traffic from 20% to 60% never moves an assigned user (50,000 users), included users still split 50/50 (independence, chi-square), and a million users split as weighted for 50/50 and 33/33/34 (chi-square p > 0.001, the PRD's bar).
+- Keys can't contain ":", because hash inputs are joined with it: `a:b` + `c` must never produce the same input as `a` + `b:c`. The API and the database both enforce the key format.
+- Flags use a third input (`{key}:rollout:{user}`), so a flag and an experiment with the same key never correlate.
+
+---
+
+## ADR-013: The config ETag is a version counter, bumped in the same transaction (M4)
+
+**Context.** SDKs poll `GET /v1/config` every 30 seconds. Most polls find nothing changed, so a conditional request (`If-None-Match`) answered with `304 Not Modified` saves the body, and the server's work of building it.
+
+**Decision.**
+- `projects.config_version` is incremented by every flag, experiment, or variant write, inside the write's own transaction (`db/projects.bump_config_version`). The ETag is `"config-<version>"`.
+- A conditional request reads only the version, one indexed row. If it matches, the answer is 304, with no config built.
+- Otherwise the whole document (version, flags, running experiments, variants) comes from **one SQL statement**, so the version and the content are from the same snapshot.
+- `Cache-Control: max-age=30`, in line with the SDK's poll interval.
+
+**Alternatives considered.**
+- *Hashing the config body* for the ETag. Always correct, but the server builds the full document on every request just to learn that it hasn't changed.
+- *A last-modified timestamp.* Two changes within the timestamp's resolution would share an ETag.
+- *Reading the version and the content in separate queries.* That is a real race. A change committing in between yields version 5 with version-4 content; the SDK caches it under `"config-5"` and gets 304 forever after, until something else changes.
+
+**Consequences.**
+- Every config write touches the project row, so concurrent config writes in one project serialize on it. At admin-dashboard write rates that costs nothing.
+- Metric changes don't bump the version: metrics aren't in the SDK config. A test checks both directions: every config write bumps it, and a metric write doesn't.

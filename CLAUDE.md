@@ -50,6 +50,6 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - Tests: pytest (integration tests use a real Postgres, not mocks), vitest for the SDK. Every bug fix gets a regression test.
 
 ## Gotchas
-- Assignment hashing must be byte-identical in Python and TypeScript. Any change requires updating shared/hash_test_vectors.json and passing both test suites.
+- Assignment hashing must be byte-identical in Python and TypeScript. Any change requires updating shared/hash_test_vectors.json (`cd server && uv run python scripts/generate_hash_vectors.py`) and passing both test suites.
 - Unique constraints on the partitioned events table must include occurred_at (the partition key).
 - Every statistical function's docstring cites the source of its formula.

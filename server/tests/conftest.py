@@ -7,14 +7,19 @@ databases on the server named by DATABASE_URL and drops them at the end.
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from secrets import token_urlsafe
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from abtest.api.app import create_app
+from abtest.config import Settings
 from abtest.db.migrate import migrate
+from abtest.keys import display_prefix, hash_key
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
@@ -115,3 +120,58 @@ def variants(conn: psycopg.Connection, experiment_id: UUID) -> dict[str, UUID]:
         "SELECT key, id FROM variants WHERE experiment_id = %s", (experiment_id,)
     ).fetchall()
     return {key: variant_id for key, variant_id in rows}
+
+
+@pytest.fixture(scope="session")
+def api_database(create_database: Callable[[], str]) -> str:
+    """A second migrated database, for tests that commit (everything through the API).
+
+    Kept apart from `migrated_database`, which only ever sees rolled-back work, so tests
+    there can rely on it being empty.
+    """
+    url = create_database()
+    with psycopg.connect(url, autocommit=True) as conn:
+        migrate(conn, MIGRATIONS_DIR)
+    return url
+
+
+@pytest.fixture(scope="session")
+def api(api_database: str) -> Iterator[TestClient]:
+    """The real app. Entering the client runs the app's lifespan (it opens the pool)."""
+    with TestClient(create_app(Settings(database_url=api_database))) as client:
+        yield client
+
+
+@pytest.fixture
+def new_project(api_database: str) -> tuple[UUID, str, str]:
+    """A committed project with a fresh server key and client key: (id, server, client).
+
+    API requests commit, so they can't be rolled back; a new project per test keeps tests
+    apart instead.
+    """
+    server_key, client_key = "sk_" + token_urlsafe(32), "ck_" + token_urlsafe(32)
+    with psycopg.connect(api_database, autocommit=True) as conn:
+        row = conn.execute(
+            "INSERT INTO projects (name) VALUES ('API test') RETURNING id"
+        ).fetchone()
+        assert row is not None
+        project: UUID = row[0]
+        for kind, key in (("server", server_key), ("client", client_key)):
+            conn.execute(
+                "INSERT INTO api_keys (project_id, kind, key_prefix, key_hash)"
+                " VALUES (%s, %s, %s, %s)",
+                (project, kind, display_prefix(key), hash_key(key)),
+            )
+    return project, server_key, client_key
+
+
+@pytest.fixture
+def admin(new_project: tuple[UUID, str, str]) -> dict[str, str]:
+    """Headers for the admin API, as the new project."""
+    return {"Authorization": f"Bearer {new_project[1]}"}
+
+
+@pytest.fixture
+def sdk(new_project: tuple[UUID, str, str]) -> dict[str, str]:
+    """Headers for the public API, as the new project's SDK."""
+    return {"X-Client-Key": new_project[2]}
