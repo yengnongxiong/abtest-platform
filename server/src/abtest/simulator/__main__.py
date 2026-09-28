@@ -1,6 +1,8 @@
 """Simulator entry point.
 
     python -m abtest.simulator validate --seed 42    # Monte Carlo validation -> docs/results
+    python -m abtest.simulator traffic --scenario scenarios/checkout_button.yaml \
+        --api http://localhost:8000                  # simulated users through the real API
 
 Run it from the repository root (`make simulate` does), so the default output directory is
 the repo's docs/results.
@@ -13,9 +15,11 @@ import sys
 import time
 from pathlib import Path
 
+import httpx2
 import numpy as np
 
 from abtest.simulator.report import RunInfo, ValidationRun, write_report
+from abtest.simulator.traffic import Scenario, run, summary
 from abtest.simulator.validation import run_aa, run_power, run_skewed_means, run_srm
 
 # Simulated experiments per scenario. The A/A count sets how tightly the false-positive
@@ -56,14 +60,42 @@ def validate(seed: int, out_dir: Path) -> None:
     print(f"wrote {out_dir}/summary.md and charts in {info.runtime_seconds:.0f} s", file=sys.stderr)
 
 
+def traffic(scenario_path: Path, api: str, experiment_key: str | None) -> None:
+    """Keys come from the environment (.env): the server key to set the experiment up, the
+    client key to send events as the SDK would."""
+    scenario = Scenario.load(scenario_path)
+    if experiment_key is not None:
+        experiment = scenario.experiment.model_copy(update={"key": experiment_key})
+        scenario = scenario.model_copy(update={"experiment": experiment})
+    server_key, client_key = (
+        os.environ.get("ABTEST_SERVER_KEY"),
+        os.environ.get("ABTEST_CLIENT_KEY"),
+    )
+    if not server_key or not client_key:
+        raise SystemExit("set ABTEST_SERVER_KEY and ABTEST_CLIENT_KEY (they are in .env)")
+    started = time.perf_counter()
+    admin = httpx2.Client(base_url=api, headers={"Authorization": f"Bearer {server_key}"})
+    public = httpx2.Client(base_url=api, headers={"X-Client-Key": client_key})
+    results = run(scenario, admin, public)
+    print(summary(scenario, results))
+    print(f"({scenario.users} users sent in {time.perf_counter() - started:.0f} s)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m abtest.simulator")
     commands = parser.add_subparsers(dest="command", required=True)
     validate_parser = commands.add_parser("validate", help="Monte Carlo validation of the stats")
     validate_parser.add_argument("--seed", type=int, default=42)
     validate_parser.add_argument("--out", type=Path, default=Path("docs/results"))
+    traffic_parser = commands.add_parser("traffic", help="simulated users through the real API")
+    traffic_parser.add_argument("--scenario", type=Path, required=True)
+    traffic_parser.add_argument("--api", default="http://localhost:8000")
+    traffic_parser.add_argument("--experiment-key", help="run under a new key (to rerun)")
     args = parser.parse_args()
-    validate(args.seed, args.out)
+    if args.command == "validate":
+        validate(args.seed, args.out)
+    else:
+        traffic(args.scenario, args.api, args.experiment_key)
 
 
 if __name__ == "__main__":

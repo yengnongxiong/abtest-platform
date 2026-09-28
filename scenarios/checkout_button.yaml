@@ -1,0 +1,22 @@
+# A bigger "Buy now" button with a true +8% relative lift in purchases (10% -> 10.8%).
+# Run: make traffic SCENARIO=checkout_button
+seed: 7
+users: 40000
+arrival_rate: 2000 # users per second
+metric:
+  key: purchase
+  name: Purchase
+  event_name: purchase
+experiment:
+  key: checkout-button
+  name: Bigger checkout button
+  hypothesis: >-
+    If we make the Buy button bigger, purchases will increase because the button is easier
+    to find.
+  traffic_bp: 10000
+  analysis_type: sequential
+  mde_relative: 0.08
+  expected_baseline: 0.10
+  variants:
+    - {key: control, name: Control, weight_bp: 5000, is_control: true, conversion_rate: 0.10}
+    - {key: big-button, name: Big button, weight_bp: 5000, conversion_rate: 0.108}

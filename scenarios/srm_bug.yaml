@@ -1,0 +1,27 @@
+# The same test with a logging bug: 5% of big-button exposures never reach the server, so
+# the variants' user counts no longer match their 50/50 weights. The SRM check must flag it.
+# (M2's simulation shows a 2% loss needs about 170,000 users to be caught reliably.)
+# Run: make traffic SCENARIO=srm_bug
+seed: 11
+users: 40000
+arrival_rate: 2000
+metric:
+  key: purchase
+  name: Purchase
+  event_name: purchase
+experiment:
+  key: checkout-button-srm
+  name: Bigger checkout button (SRM bug)
+  hypothesis: >-
+    If we make the Buy button bigger, purchases will increase because the button is easier
+    to find.
+  traffic_bp: 10000
+  analysis_type: sequential
+  mde_relative: 0.08
+  expected_baseline: 0.10
+  variants:
+    - {key: control, name: Control, weight_bp: 5000, is_control: true, conversion_rate: 0.10}
+    - {key: big-button, name: Big button, weight_bp: 5000, conversion_rate: 0.108}
+srm_bug:
+  variant: big-button
+  drop_rate: 0.05

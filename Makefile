@@ -6,7 +6,7 @@
 -include .env
 export
 
-.PHONY: setup dev down migrate test lint simulate
+.PHONY: setup dev down migrate test lint simulate traffic
 
 # Copy the example only when .env is missing, so local edits are never overwritten.
 .env:
@@ -42,3 +42,8 @@ migrate: .env
 # Run from the repo root so the results land in docs/results.
 simulate:
 	uv run --project server python -m abtest.simulator validate --seed 42
+
+# Simulated users through the running stack (`make dev`), e.g. make traffic SCENARIO=srm_bug
+SCENARIO ?= checkout_button
+traffic:
+	uv run --project server python -m abtest.simulator traffic --scenario scenarios/$(SCENARIO).yaml

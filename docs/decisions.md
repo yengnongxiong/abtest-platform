@@ -319,3 +319,63 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - **Correct for one instance only.** With N API processes behind a load balancer, each allows the full rate, so a key could reach N × 100 requests/s. Moving to Redis (a Lua script doing the same arithmetic) or to the load balancer fixes that, and only this module would change.
 - Buckets reset when the process restarts. That's harmless: a restart can grant at most one extra burst.
 - The limit is per request, not per event: a request carries up to 500 events, so 100 requests/s is up to 50,000 events/s per key before the limit applies. M9 measures what the database sustains.
+
+---
+
+## ADR-016: How events are attributed, and the limits we accept (M7)
+
+**Context.** A result is only as good as the question "which events count, for whom?". PRD §13 fixes the rule; this records how it's implemented, and the limitations we document rather than correct.
+
+**Decision.** One SQL query per (experiment, metric) (`db/results.py`):
+- The population is the experiment's exposures that aren't `conflicted`. The SRM check uses the same population.
+- A user's events count if they fall in `[first_exposed_at, min(first_exposed_at + window, cutoff))`: the window includes its start and excludes its end, and the cutoff is now, or the stop time for a stopped experiment.
+- A conversion metric counts users with at least one such event. A mean metric sums each user's values (a null value counts as 0; a user with no events counts as 0) and aggregates n, sum, and sum of squares per variant.
+- The query also bounds `occurred_at ≥ started_at`, which follows from the rules above but lets Postgres skip every partition from before the start.
+- Every edge case (before exposure, each end of the window, after the cutoff, repeat conversions, conflicted users, zero and null values) has a hand-built test.
+
+**Limitations, documented rather than corrected.**
+- **Recently exposed users have had less time to convert.** A user exposed an hour ago has had one hour of a 168-hour window. While the experiment runs, rates are therefore diluted toward zero, equally for every variant, so comparisons stay fair. Analyzing only users whose full window has elapsed is a stretch goal (PRD §23).
+- **`occurred_at` comes from the client's clock.** A client running behind can report events from before the experiment started, or outside a user's window, and they are then not attributed. We measured this for real: this laptop's clock trails the database container's by 33 ms, and test events sent within 33 ms of starting an experiment were (correctly) not attributed. The traffic generator waits one second after starting, and the tests stamp events by the server's clock.
+- **No correction for multiple comparisons.** With several treatment variants, or many secondary metrics, some will look significant by chance. The primary metric's verdict is the decision (PRD §14); the others are context.
+
+**Alternatives considered.**
+- *Attributing by `received_at` (the server's clock).* It avoids clock skew, but then batching, retries, and offline devices would place events at the wrong time: the time of the upload, not of the action.
+- *Correcting skew per device* (estimating each client's clock offset from `received_at` − `occurred_at`). Out of scope for the MVP, and PRD §13 says to document the limitation, not correct it.
+
+**Consequences.** Early snapshots understate every variant's rate; the lift and its CI remain valid comparisons.
+
+---
+
+## ADR-017: Advisory locks for the worker's jobs and for results (M7)
+
+**Context.** Two things must never happen twice at once. Two worker processes (a scaled deployment, or a restart overlapping the old process) must not both run the same job. And two *looks* at one experiment must not interleave: under mSPRT each look continues from the previous one's state, so two looks computed at the same time from the same state would lose one of them, and the always-valid p-value could appear to go up.
+
+**Decision.**
+- Each worker job runs in one transaction that starts with `pg_try_advisory_xact_lock(job id)`. If another worker holds it, the job is skipped (tested).
+- Each look (from the worker or from `POST .../recompute`) takes `pg_advisory_xact_lock(hashtext('results:' || experiment id))`. It then reads the latest snapshot, and stamps the new one with `clock_timestamp()` taken **after** the lock, so looks are ordered the way they were taken. (Using the transaction start time would let a long worker transaction write a newer look with an older timestamp.)
+- The locks are transaction-scoped: Postgres releases them when the transaction ends, so a crash or a pooled connection can't leak one.
+
+**Alternatives considered.**
+- *Session-level advisory locks.* They survive the transaction and must be released by hand, and a pooled connection returned without releasing one would block every later job.
+- *A lock table with `SELECT ... FOR UPDATE`, or leader election.* That's more machinery for the same guarantee.
+- *Unique constraints on snapshots.* They would stop duplicate rows, but not two looks racing on the same previous state.
+
+**Consequences.**
+- A recompute that arrives while the worker is analyzing that experiment waits until the worker's transaction ends. At this scale that takes milliseconds: the worker's log showed a 38 ms run with one running experiment (M9 measures larger ones).
+- A job's writes all commit together or not at all.
+
+---
+
+## ADR-018: Results are precomputed snapshots, not computed on read (M7)
+
+**Context.** The dashboard shows each experiment's results, and a chart of how the lift and its CI moved over time. Results could be computed when someone opens the page, or computed on a schedule and stored.
+
+**Decision.** The worker computes a snapshot for every metric of every running experiment every 5 minutes (`RESULTS_INTERVAL_SECONDS`), plus a final one after an experiment stops. Snapshots are append-only rows in `results_snapshots`, with the per-variant summaries, the comparisons, the SRM check, and the mSPRT state in `data`. The dashboard reads them (`GET .../results`), and `POST .../recompute` adds a look on demand.
+
+**Alternatives considered.** *Computing on read.* It's always current, but every page view would scan exposures and events. The mSPRT would also need its whole history recomputed on every read, because the always-valid p-value is a running minimum over looks: without stored looks there is no well-defined "previous state".
+
+**Consequences.**
+- Page loads are a single indexed read (`results_snapshots_latest`), whatever the experiment's size.
+- Results are up to 5 minutes old; recompute exists for when that matters.
+- The stored series *is* the sequence of looks the mSPRT guarantee is about. Snapshots are never rewritten, so the history shown is the history that was analyzed.
+- Storage grows by one row per metric per 5 minutes per running experiment: about 8,000 rows per metric over four weeks. That's small, but the series endpoint would need downsampling for experiments that run for months.

@@ -21,6 +21,7 @@ from abtest.api.routers import (
     flags,
     health,
     metrics,
+    results,
     sample_size,
 )
 from abtest.config import Settings
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.add_middleware(PublicCORS)
     install_error_handlers(app)
-    for module in (health, config, events, metrics, flags, experiments, api_keys, sample_size):
+    routers = (health, config, events, metrics, flags, experiments, results, api_keys, sample_size)
+    for module in routers:
         app.include_router(module.router)
     return app

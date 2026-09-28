@@ -37,6 +37,7 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make test: Python + SDK tests (starts the db container first)
 - make lint: ruff, mypy, eslint, tsc
 - make simulate: run Monte Carlo validation (about 30 s) and regenerate docs/results/
+- make traffic SCENARIO=checkout_button: simulated users through the running stack (scenarios/*.yaml), then print the results
 
 ## Local environment
 - Docker runs via Colima (`colima start` after a reboot). Node 24 via Homebrew (node@24).

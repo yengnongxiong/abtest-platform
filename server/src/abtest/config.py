@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # Event ingestion, per client key (PRD §11): RATE_LIMIT_PER_SECOND, RATE_LIMIT_BURST.
     rate_limit_per_second: float = 100.0
     rate_limit_burst: int = 200
+    # The worker: how often results snapshots are computed (RESULTS_INTERVAL_SECONDS).
+    results_interval_seconds: float = 300.0
 
 
 class MigrateSettings(Settings):

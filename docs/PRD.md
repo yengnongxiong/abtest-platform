@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.6 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.7 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -472,6 +472,10 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.7 — M7 decisions (2026-09-28)
+- §15: worker logs report exposure rows read as the rows scanned. Looks take a per-experiment lock and are stamped after it, so concurrent looks can't lose mSPRT state.
+- §16B: the srm_bug scenario loses 5% of treatment exposures (a 2% loss needs about 170,000 users to be caught reliably, per M2), with 40,000 users.
+
 ### v1.6 — M6 decisions (2026-09-28)
 - §11: what accepted counts; whole-request errors (400, 422, 413); more per-event rejections (unknown fields, NUL, lone surrogates, naive timestamps).
 

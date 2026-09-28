@@ -362,3 +362,101 @@ class EventsResult(BaseModel):
     accepted: int
     duplicates: int
     rejected: list[Rejection]
+
+
+# --- Results snapshots (the worker writes them; GET .../results reads them) -------------------
+
+
+class MSPRTStateOut(BaseModel):
+    """The mSPRT's running minimum p-value and intersected CI after a look (see stats)."""
+
+    p_value: float
+    ci_low: float
+    ci_high: float
+
+
+class VariantSummary(BaseModel):
+    key: str
+    is_control: bool
+    weight_bp: int
+    users: int
+    # Conversion metrics: converters. Mean metrics: the per-user sum and sum of squares.
+    conversions: int | None
+    total: float
+    total_sq: float
+
+
+class Comparison(BaseModel):
+    """One treatment variant against the control."""
+
+    variant_key: str
+    abs_diff: float | None
+    rel_lift: float | None
+    ci_low: float | None
+    ci_high: float | None
+    rel_ci_low: float | None
+    rel_ci_high: float | None
+    p_value: float | None
+    significant: bool
+    insufficient_data: str | None
+    verdict: str
+    # Sequential analysis only: what the next look continues from.
+    msprt_state: MSPRTStateOut | None = None
+
+
+class SrmOut(BaseModel):
+    p_value: float | None
+    flagged: bool
+    insufficient_data: str | None
+
+
+class SnapshotData(BaseModel):
+    """Everything one look at an experiment's metric produced (results_snapshots.data)."""
+
+    cutoff: datetime
+    analysis_type: AnalysisType
+    alpha: float
+    tau: float | None  # the mSPRT mixing standard deviation; None for fixed-horizon
+    metric_key: str
+    metric_kind: MetricKind
+    direction: Direction
+    window_hours: int
+    users: int
+    conflicted_users: int
+    mismatched_users: int
+    srm: SrmOut
+    variants: list[VariantSummary]
+    comparisons: list[Comparison]
+
+
+class Snapshot(BaseModel):
+    computed_at: datetime
+    data: SnapshotData
+
+
+class SeriesComparison(BaseModel):
+    variant_key: str
+    rel_lift: float | None
+    rel_ci_low: float | None
+    rel_ci_high: float | None
+    p_value: float | None
+
+
+class SeriesPoint(BaseModel):
+    """A compact view of one snapshot, for the lift-over-time chart."""
+
+    computed_at: datetime
+    users: int
+    srm_flagged: bool
+    comparisons: list[SeriesComparison]
+
+
+class Results(BaseModel):
+    experiment_key: str
+    metric_key: str
+    latest: Snapshot | None
+    series: list[SeriesPoint]
+
+
+class Recomputed(BaseModel):
+    metric_keys: list[str]
