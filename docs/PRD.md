@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.5 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.6 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -204,6 +204,9 @@ POST /v1/events
   - Like every event, they are stored in the events table. Newly inserted ones are then upserted into the exposures table (§10).
   - An exposure that arrives after its experiment stopped is rejected, even if its occurred_at is earlier. This is a documented limitation.
 - Response: 202 {accepted, duplicates, rejected:[{index, reason}]}. One bad event never fails the whole batch.
+  - accepted counts newly stored events; accepted + duplicates + len(rejected) = the number sent.
+  - A body that isn't JSON is a 400, a wrong envelope (no sdk, over 500 events) a 422, and a body over 1 MB a 413: those fail the whole request.
+  - Also rejected per event: unknown fields, NUL characters or lone surrogates anywhere (Postgres and UTF-8 can't store them), and timestamps without a time zone.
 - Rate limit per key: in-memory token bucket (default 100 requests/s, burst 200, both configurable via env). Exceeding it returns 429 with Retry-After.
   - Document in decisions.md that this works for one instance and would move to Redis or the load balancer with multiple instances.
 
@@ -469,6 +472,9 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.6 — M6 decisions (2026-09-28)
+- §11: what accepted counts; whole-request errors (400, 422, 413); more per-event rejections (unknown fields, NUL, lone surrogates, naive timestamps).
+
 ### v1.5 — M5 decisions (2026-09-28)
 - §12: what stats().dropped counts; a flush sends the whole queue; invalid user ids throw; events JSON can't encode are dropped at track() time.
 - §11: GET /v1/config also sends `Vary: X-Client-Key`, so a shared cache never serves one project's config to another.

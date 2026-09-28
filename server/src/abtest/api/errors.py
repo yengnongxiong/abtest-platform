@@ -10,13 +10,25 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
-from abtest.errors import Conflict, DomainError, NotFound, Unauthorized, Unprocessable
+from abtest.errors import (
+    BadRequest,
+    Conflict,
+    DomainError,
+    NotFound,
+    RateLimited,
+    TooLarge,
+    Unauthorized,
+    Unprocessable,
+)
 
 STATUS_BY_ERROR: dict[type[DomainError], int] = {
     NotFound: 404,
     Conflict: 409,
     Unprocessable: 422,
     Unauthorized: 401,
+    BadRequest: 400,
+    TooLarge: 413,
+    RateLimited: 429,
 }
 
 
@@ -34,7 +46,11 @@ def error_response(
 async def domain_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, DomainError)  # registered for DomainError only
     status = STATUS_BY_ERROR.get(type(exc), 400)
-    headers = {"WWW-Authenticate": "Bearer"} if status == 401 else None
+    headers = None
+    if isinstance(exc, Unauthorized):
+        headers = {"WWW-Authenticate": "Bearer"}
+    elif isinstance(exc, RateLimited):
+        headers = {"Retry-After": exc.retry_after}
     return error_response(status, exc.code, exc.message, exc.details, headers)
 
 

@@ -12,7 +12,17 @@ from fastapi import FastAPI
 
 from abtest.api.cors import PublicCORS
 from abtest.api.errors import install_error_handlers
-from abtest.api.routers import api_keys, config, experiments, flags, health, metrics, sample_size
+from abtest.api.rate_limit import TokenBucketLimiter
+from abtest.api.routers import (
+    api_keys,
+    config,
+    events,
+    experiments,
+    flags,
+    health,
+    metrics,
+    sample_size,
+)
 from abtest.config import Settings
 from abtest.db.pool import create_pool
 
@@ -32,8 +42,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pool.close()
 
     app = FastAPI(title="abtest-platform API", lifespan=lifespan)
+    app.state.rate_limiter = TokenBucketLimiter(
+        settings.rate_limit_per_second, settings.rate_limit_burst
+    )
     app.add_middleware(PublicCORS)
     install_error_handlers(app)
-    for module in (health, config, metrics, flags, experiments, api_keys, sample_size):
+    for module in (health, config, events, metrics, flags, experiments, api_keys, sample_size):
         app.include_router(module.router)
     return app

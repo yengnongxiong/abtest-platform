@@ -49,14 +49,19 @@ def server_project(conn: ConnDep, authorization: Annotated[str | None, Header()]
     return project
 
 
-def client_project(
-    conn: ConnDep,
+def client_key(
     x_client_key: Annotated[str | None, Header()] = None,
     client_key: Annotated[str | None, Query()] = None,
-) -> UUID:
+) -> str | None:
     """Public endpoints: the client key from the X-Client-Key header, or from the client_key
     query parameter (navigator.sendBeacon can't set headers)."""
-    key = x_client_key or client_key
+    return x_client_key or client_key
+
+
+ClientKey = Annotated[str | None, Depends(client_key)]
+
+
+def client_project(conn: ConnDep, key: ClientKey) -> UUID:
     project = project_for_key(conn, key, "client") if key else None
     if project is None:
         raise Unauthorized("unauthorized", "send a valid client key in the X-Client-Key header")

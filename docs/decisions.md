@@ -297,3 +297,25 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - The SDK is 2,556 bytes min+gzip (ESM build; `npm run size`, which CI runs and which fails above 5 KB).
 - Browsers cap the total size of in-flight beacons and keepalive requests at about 64 KB per page, so a very long queue can't all survive an unload; what the browser refuses is lost. The default batch size and flush interval (50 events, 5 s) keep the queue short in practice.
 - Events are stored at least once and counted once. The client's clock sets `occurred_at` (PRD §13 documents that limitation).
+
+---
+
+## ADR-015: An in-memory rate limiter, per client key (M6)
+
+**Context.** `POST /v1/events` is public: the client key ships in every page. A buggy page (an event in a render loop) or a hostile one could flood ingestion. PRD §11 asks for a per-key limit of 100 requests/s with bursts of 200, answered with `429` and `Retry-After`.
+
+**Decision.** A token bucket per client key, in the API process's memory (`api/rate_limit.py`):
+- `burst` tokens to start with, refilled at `rate` per second; each request takes one. The defaults are 100/s and 200, configurable with `RATE_LIMIT_PER_SECOND` and `RATE_LIMIT_BURST`.
+- A refused request gets `429` and `Retry-After` in whole seconds, rounded up, so a client that obeys it succeeds. The SDK honors it (ADR-014).
+- Only keys that authenticate get a bucket, so random keys can't grow the limiter's memory.
+- Buckets are keyed by the key's hash, never the key itself, and a lock guards them because route handlers run in a thread pool.
+
+**Alternatives considered.**
+- *Redis (or another shared store).* It limits correctly across many API instances, but it's another service to run, and there is one instance here.
+- *Limiting at the load balancer or a gateway.* That's where it belongs in production, but there is no load balancer in the local stack, and the limit is part of what the tests should prove.
+- *A fixed window per second.* Simpler, but it allows twice the rate across a window boundary, and it doesn't express bursts.
+
+**Consequences.**
+- **Correct for one instance only.** With N API processes behind a load balancer, each allows the full rate, so a key could reach N × 100 requests/s. Moving to Redis (a Lua script doing the same arithmetic) or to the load balancer fixes that, and only this module would change.
+- Buckets reset when the process restarts. That's harmless: a restart can grant at most one extra burst.
+- The limit is per request, not per event: a request carries up to 500 events, so 100 requests/s is up to 50,000 events/s per key before the limit applies. M9 measures what the database sustains.

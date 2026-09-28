@@ -29,3 +29,19 @@ class Unprocessable(DomainError):
 
 class Unauthorized(DomainError):
     """No valid API key of the right kind."""
+
+
+class BadRequest(DomainError):
+    """The request body can't be read: not JSON, or not the expected envelope."""
+
+
+class TooLarge(DomainError):
+    """The request body is over the size limit."""
+
+
+class RateLimited(DomainError):
+    """Too many requests for this key; retry after `retry_after` seconds."""
+
+    def __init__(self, retry_after: str) -> None:
+        super().__init__("rate_limited", "too many requests for this key; slow down")
+        self.retry_after = retry_after

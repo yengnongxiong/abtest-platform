@@ -5,11 +5,21 @@ instead of being silently ignored. In PATCH models, a missing or null field mean
 unchanged".
 """
 
+import json
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from abtest.keys import KeyKind
 
@@ -258,3 +268,97 @@ class Config(BaseModel):
     config_version: int
     flags: list[ConfigFlag]
     experiments: list[ConfigExperiment]
+
+
+# --- Public events (POST /v1/events) ----------------------------------------------------------
+
+EXPOSURE_EVENT = "$exposure"
+MAX_PROPERTIES_BYTES = 4096
+
+
+class SdkInfo(BaseModel):
+    name: str = Field(max_length=100)
+    version: str = Field(max_length=50)
+
+
+class EventBatch(BaseModel):
+    """The envelope. Each event is validated on its own (EventIn), so one bad event is
+    rejected with a reason instead of failing the whole batch."""
+
+    sdk: SdkInfo
+    events: list[Any] = Field(max_length=500)
+
+
+class EventIn(RequestModel):
+    event_id: UUID
+    user_id: str
+    name: EventName
+    occurred_at: AwareDatetime  # must carry a time zone: a naive time is ambiguous
+    value: Annotated[float, Field(strict=True, allow_inf_nan=False)] | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("user_id")
+    @classmethod
+    def check_user_id(cls, user_id: str) -> str:
+        """1-200 characters of valid Unicode. A lone surrogate can't be encoded as UTF-8 (the
+        SDK would hash something else), and Postgres text can't hold NUL."""
+        if not 1 <= len(user_id) <= 200:
+            raise ValueError("must be 1-200 characters")
+        _check_storable(user_id)
+        return user_id
+
+    @field_validator("properties")
+    @classmethod
+    def check_properties(cls, properties: dict[str, Any]) -> dict[str, Any]:
+        for text in _strings(properties):
+            _check_storable(text)
+        encoded = json.dumps(properties, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode()) > MAX_PROPERTIES_BYTES:
+            raise ValueError(f"must be at most {MAX_PROPERTIES_BYTES} bytes as JSON")
+        return properties
+
+    @model_validator(mode="after")
+    def check_exposure(self) -> Self:
+        if self.name == EXPOSURE_EVENT:
+            for field in ("experiment_key", "variant_key"):
+                if not isinstance(self.properties.get(field), str):
+                    raise ValueError(f"an exposure needs properties.{field}")
+        return self
+
+
+def _check_storable(text: str) -> None:
+    """Postgres rejects NUL in text and JSON; UTF-8 can't encode a lone surrogate."""
+    if "\x00" in text:
+        raise ValueError("must not contain NUL characters")
+    try:
+        text.encode()
+    except UnicodeEncodeError:
+        raise ValueError("must be valid Unicode (no lone surrogates)") from None
+
+
+def _strings(value: Any) -> Iterator[str]:
+    """Every string (keys too) in a JSON value. Iterative, so deep nesting can't overflow
+    the stack."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            yield item
+        elif isinstance(item, dict):
+            yield from item.keys()
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+
+
+class Rejection(BaseModel):
+    index: int
+    reason: str
+
+
+class EventsResult(BaseModel):
+    """accepted + duplicates + len(rejected) = the number of events sent."""
+
+    accepted: int
+    duplicates: int
+    rejected: list[Rejection]
