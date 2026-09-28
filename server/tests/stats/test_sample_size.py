@@ -77,3 +77,9 @@ def test_power_is_the_inverse_of_sample_size() -> None:
 
     assert power_two_proportions(0.10, 0.10, alpha=0.05, n_per_variant=n) >= 0.8
     assert power_two_proportions(0.10, 0.10, alpha=0.05, n_per_variant=n - 1) < 0.8
+
+
+@pytest.mark.parametrize(("baseline", "n"), [(0.0, 1_000), (1.0, 1_000), (0.1, 0)])
+def test_power_rejects_invalid_input(baseline: float, n: int) -> None:
+    with pytest.raises(ValueError):
+        power_two_proportions(baseline, 0.1, alpha=0.05, n_per_variant=n)
