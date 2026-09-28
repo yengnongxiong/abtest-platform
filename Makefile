@@ -43,7 +43,10 @@ migrate: .env
 simulate:
 	uv run --project server python -m abtest.simulator validate --seed 42
 
-# Simulated users through the running stack (`make dev`), e.g. make traffic SCENARIO=srm_bug
+# Simulated users through the running stack (`make dev`), e.g. make traffic SCENARIO=srm_bug.
+# ARGS passes options on, e.g. ARGS="--use-running --experiment-key my-test" to feed an
+# experiment created and started in the dashboard.
 SCENARIO ?= checkout_button
+ARGS ?=
 traffic:
-	uv run --project server python -m abtest.simulator traffic --scenario scenarios/$(SCENARIO).yaml
+	uv run --project server python -m abtest.simulator traffic --scenario scenarios/$(SCENARIO).yaml $(ARGS)

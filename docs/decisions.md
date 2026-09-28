@@ -379,3 +379,44 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - Results are up to 5 minutes old; recompute exists for when that matters.
 - The stored series *is* the sequence of looks the mSPRT guarantee is about. Snapshots are never rewritten, so the history shown is the history that was analyzed.
 - Storage grows by one row per metric per 5 minutes per running experiment: about 8,000 rows per metric over four weeks. That's small, but the series endpoint would need downsampling for experiments that run for months.
+
+---
+
+## ADR-019: Dashboard auth: one password, a signed cookie, and the server key kept on the server (M8)
+
+**Context.** The dashboard (PRD §17) needs to keep strangers out and to call the admin API, which requires a server key. There is one admin and one project, and the tech stack has no auth library.
+
+**Decision.**
+- The admin types `ADMIN_PASSWORD`. It's compared in constant time: both strings are hashed with SHA-256 first, so not even their lengths are compared directly.
+- A correct password sets an httpOnly, `SameSite=Lax` cookie (`Secure` in production) holding an expiry time and an HMAC-SHA256 signature of it, keyed by `SESSION_SECRET` (at least 32 characters) through Web Crypto. It lasts 7 days. `crypto.subtle.verify` checks the signature in constant time.
+- `proxy.ts` (Next.js 16's name for middleware) redirects every page but /login to /login without a valid cookie, and answers 401 on /api/*.
+- Every server action calls `requireSignedIn()` as well. The proxy isn't enough on its own: a server action can be invoked by a POST to *any* route, including /login, which the proxy has to let through.
+- The API is called only from the Next.js server (server components, server actions, and one route handler that forwards the sample-size estimate), with `ABTEST_SERVER_KEY` from the server's environment. It's never a `NEXT_PUBLIC_*` variable, so it's never in a bundle, and the browser never talks to the admin API.
+
+**Alternatives considered.**
+- *A sessions table in Postgres.* It would allow revoking one session, but needs new API endpoints and storage for a single admin.
+- *Auth.js, or a JWT library.* A dependency outside the PRD's stack, for what is 76 lines of Web Crypto code here (`web/lib/session.ts`).
+- *HTTP Basic Auth at a reverse proxy.* It depends on the deployment, and it has no sign-out.
+- *Calling the API from the browser.* That would put a server key in every visitor's hands.
+
+**Consequences.**
+- Sessions are stateless: sign-out deletes the cookie, but a stolen cookie stays valid until it expires. Rotating `SESSION_SECRET` signs everyone out.
+- There is no rate limit on sign-in attempts, so a deployment needs a long random `ADMIN_PASSWORD`.
+- A page load costs one or two server-side API calls; the browser receives only HTML and the data on the page.
+
+---
+
+## ADR-020: Self-hosted fonts instead of next/font/google (M8)
+
+**Context.** The dashboard uses IBM Plex Sans and IBM Plex Serif. With `next/font/google`, Next.js downloads the font files from Google at build time, and in development when a page first compiles. During M8, Google's CSS briefly listed font URLs of the form `fonts.gstatic.com/l/font?kit=…&…`. Turbopack failed to parse them ("next/font/google queries have exactly one entry"), and every dashboard page returned 500 until the response changed back.
+
+**Decision.** The Latin subsets are committed in `web/app/fonts/` (three woff2 files, 70,684 bytes in all, with the SIL Open Font License) and loaded with `next/font/local`, which ships with Next.js.
+
+**Alternatives considered.**
+- *Keep next/font/google and retry.* The failure is outside this repo and intermittent, and it would also break CI builds and the compose smoke test.
+- *A `<link>` to Google Fonts at runtime.* The build no longer needs the network, but every visitor's browser contacts Google, and text renders in a fallback font until the fonts arrive.
+
+**Consequences.**
+- Builds are reproducible offline, and no request goes to Google.
+- Only Latin characters are covered. Other scripts fall back to the system font.
+- Font updates are manual (rare).

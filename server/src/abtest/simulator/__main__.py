@@ -3,6 +3,8 @@
     python -m abtest.simulator validate --seed 42    # Monte Carlo validation -> docs/results
     python -m abtest.simulator traffic --scenario scenarios/checkout_button.yaml \
         --api http://localhost:8000                  # simulated users through the real API
+    python -m abtest.simulator traffic --scenario scenarios/checkout_button.yaml \
+        --use-running                                # feed an experiment started in the dashboard
 
 Run it from the repository root (`make simulate` does), so the default output directory is
 the repo's docs/results.
@@ -60,7 +62,7 @@ def validate(seed: int, out_dir: Path) -> None:
     print(f"wrote {out_dir}/summary.md and charts in {info.runtime_seconds:.0f} s", file=sys.stderr)
 
 
-def traffic(scenario_path: Path, api: str, experiment_key: str | None) -> None:
+def traffic(scenario_path: Path, api: str, experiment_key: str | None, use_running: bool) -> None:
     """Keys come from the environment (.env): the server key to set the experiment up, the
     client key to send events as the SDK would."""
     scenario = Scenario.load(scenario_path)
@@ -76,7 +78,7 @@ def traffic(scenario_path: Path, api: str, experiment_key: str | None) -> None:
     started = time.perf_counter()
     admin = httpx2.Client(base_url=api, headers={"Authorization": f"Bearer {server_key}"})
     public = httpx2.Client(base_url=api, headers={"X-Client-Key": client_key})
-    results = run(scenario, admin, public)
+    results = run(scenario, admin, public, use_running)
     print(summary(scenario, results))
     print(f"({scenario.users} users sent in {time.perf_counter() - started:.0f} s)")
 
@@ -91,11 +93,16 @@ def main() -> None:
     traffic_parser.add_argument("--scenario", type=Path, required=True)
     traffic_parser.add_argument("--api", default="http://localhost:8000")
     traffic_parser.add_argument("--experiment-key", help="run under a new key (to rerun)")
+    traffic_parser.add_argument(
+        "--use-running",
+        action="store_true",
+        help="send traffic to an existing running experiment instead of creating one",
+    )
     args = parser.parse_args()
     if args.command == "validate":
         validate(args.seed, args.out)
     else:
-        traffic(args.scenario, args.api, args.experiment_key)
+        traffic(args.scenario, args.api, args.experiment_key, args.use_running)
 
 
 if __name__ == "__main__":

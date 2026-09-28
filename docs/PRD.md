@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.7 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.8 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -92,7 +92,7 @@ abtest-platform/
 ## 8. Tech stack (ask before adding anything else)
 - Python 3.12+ with: uv, FastAPI, Pydantic v2, pydantic-settings, psycopg 3 + psycopg_pool, mmh3, NumPy, SciPy, matplotlib, PyYAML, httpx2, pytest, ruff, mypy. statsmodels is a test-only dependency, used for cross-checking.
 - TypeScript SDK: tsup, vitest. The SDK has zero runtime dependencies.
-- Web: Next.js (App Router), TypeScript, Tailwind CSS, Recharts.
+- Web: Next.js (App Router), TypeScript, Tailwind CSS, Recharts (with react-is, its required peer dependency). vitest (dev) tests the dashboard's pure functions.
 - Infrastructure and tooling: PostgreSQL 16, Docker Compose, GitHub Actions, Locust.
 - Approved additions (v1.1):
   - uvicorn: the ASGI server that runs FastAPI.
@@ -217,6 +217,7 @@ Admin endpoints (Authorization: Bearer <server key>):
   - Definition fields (event_name, kind, direction, window_hours) can be edited only while no started experiment uses the metric. Otherwise existing results would change retroactively.
 - Flags: POST /admin/flags, GET /admin/flags, and GET/PATCH/DELETE /admin/flags/{key}.
 - Experiments: POST /admin/experiments, GET /admin/experiments, and GET/PATCH /admin/experiments/{key}.
+  - Each experiment in the list carries latest_results: the time, user count, and SRM flag of its newest primary-metric snapshot (null before the first), so the dashboard's list page needs one call, not one per experiment.
   - PATCH on a running experiment may only raise traffic_bp or edit the name. A stopped experiment may only be renamed. In PATCH bodies, a missing or null field means unchanged.
 - API keys: GET /admin/api-keys, POST /admin/api-keys (returns the plaintext key once), POST /admin/api-keys/{id}/revoke.
   - The project's last active server key can't be revoked (409), which would lock everyone out of the admin API.
@@ -343,6 +344,7 @@ Command: `python -m abtest.simulator validate --seed 42`. It writes docs/results
 Command: `python -m abtest.simulator traffic --scenario scenarios/<name>.yaml --api http://localhost:8000`.
 - The scenario YAML defines the experiment, its variants, the true conversion rate per variant, an optional SRM bug, the user count, and the arrival rate.
 - The generator creates and starts the experiment via the admin API, then sends exposures and events through the public API in batches, using the real assignment code.
+  - With `--use-running`, it skips creating and starting, and feeds an experiment that is already running (for example, one started in the dashboard). It first checks that the experiment has the scenario's variant keys and that its primary metric counts the scenario's event, and exits with the reason if not.
 - The generator is seeded, so a run is reproducible. A single run's CI containing the true lift is one draw; CI coverage across many runs is proven by §16A.
 - Ship two scenarios: checkout_button (true +8% lift) and srm_bug.
 
@@ -368,6 +370,7 @@ Pages:
   - Overview, changelog, and start/stop/clone controls.
   - Results for each metric: variant, users, conversions or mean, lift vs control with CI, p-value (or always-valid p), and a verdict chip.
   - A plain-language sentence generated from a template (not an LLM), for example: "Variant B increased checkout conversion by 4.1% (95% CI 1.2% to 7.0%). This is statistically significant."
+    - CI bounds carry signs ("−2.1% to +16.5%"), so an interval that crosses zero is visible. A sequential analysis says "always-valid CI", and "not statistically significant yet".
   - A chart of lift with CI over time.
   - Counts of conflicted and assignment-mismatch users.
   - If SRM is flagged: a red banner explaining why the results can't be trusted, with the results collapsed behind a "Show anyway" button.
@@ -395,11 +398,11 @@ Style: clean, responsive, and accessible. Tailwind; no heavy component library.
 
 ## 20. Testing and CI
 - pytest covers unit tests and integration tests. Integration tests run against a real Postgres: either from docker compose, or a fixture that creates a throwaway database and runs the migrations.
-- vitest covers the SDK. The shared hash vectors are tested in both suites.
+- vitest covers the SDK, and the dashboard's pure functions (result sentences, formatting, sample-size days, the session cookie). The shared hash vectors are tested in both suites.
 - GitHub Actions runs:
   - ruff, mypy, and pytest (with a Postgres service container)
   - SDK lint, typecheck, test, and build
-  - web lint, typecheck, and build
+  - web lint, typecheck, test, and build
   - a compose smoke test: bring the stack up with `docker compose up --wait` and check that every service responds. It proves the "fresh clone + `make dev`" criterion on every push.
 
 ## 21. Documentation deliverables
@@ -472,6 +475,12 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.8 — M8 decisions (2026-09-28)
+- §11: GET /admin/experiments includes latest_results for each experiment.
+- §16B: the traffic generator's `--use-running` option, so the dashboard flow (create → start → run scenario → read results) can use it.
+- §17: signed CI bounds and "always-valid" wording in the result sentence.
+- §8, §20: vitest also tests the dashboard; react-is (Recharts' peer dependency). Fonts are self-hosted (ADR-020).
+
 ### v1.7 — M7 decisions (2026-09-28)
 - §15: worker logs report exposure rows read as the rows scanned. Looks take a per-experiment lock and are stamped after it, so concurrent looks can't lose mSPRT state.
 - §16B: the srm_bug scenario loses 5% of treatment exposures (a 2% loss needs about 170,000 users to be caught reliably, per M2), with 40,000 users.

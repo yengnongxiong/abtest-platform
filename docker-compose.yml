@@ -81,6 +81,11 @@ services:
 
   web:
     build: ./web
+    environment:
+      ABTEST_API_URL: http://api:8000 # server-to-server, inside the compose network
+      ABTEST_SERVER_KEY: ${ABTEST_SERVER_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
     ports:
       - "3000:3000"
     healthcheck:

@@ -52,7 +52,19 @@ SELECT e.key, e.name, e.hypothesis, e.status, e.traffic_bp, e.analysis_type, e.a
                            m.key)
            FROM experiment_metrics em JOIN metrics m ON m.id = em.metric_id
            WHERE em.experiment_id = e.id
-       ), '[]') AS metrics
+       ), '[]') AS metrics,
+       (
+           -- The newest snapshot of the primary metric, for the dashboard's list
+           -- (served by results_snapshots_latest).
+           SELECT json_build_object(
+                      'computed_at', s.computed_at, 'users', s.total_users,
+                      'srm_flagged', s.srm_flag)
+           FROM experiment_metrics em
+           JOIN results_snapshots s ON s.experiment_id = e.id AND s.metric_id = em.metric_id
+           WHERE em.experiment_id = e.id AND em.role = 'primary'
+           ORDER BY s.computed_at DESC, s.id DESC
+           LIMIT 1
+       ) AS latest_results
 """
 
 CHANGES = """,

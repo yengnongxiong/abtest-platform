@@ -198,6 +198,14 @@ class Change(BaseModel):
     created_at: datetime
 
 
+class LatestResults(BaseModel):
+    """The newest snapshot of the primary metric, in brief."""
+
+    computed_at: datetime
+    users: int
+    srm_flagged: bool
+
+
 class Experiment(BaseModel):
     key: str
     name: str
@@ -214,6 +222,7 @@ class Experiment(BaseModel):
     updated_at: datetime
     variants: list[Variant]
     metrics: list[ExperimentMetric]
+    latest_results: LatestResults | None
 
 
 class ExperimentDetail(Experiment):

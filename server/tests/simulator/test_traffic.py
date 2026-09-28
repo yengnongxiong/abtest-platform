@@ -86,3 +86,71 @@ def test_lost_exposures_are_caught_by_the_srm_check(
     data = results["latest"]["data"]
     assert data["srm"]["flagged"]
     assert data["comparisons"][0]["verdict"] == "srm_untrustworthy"
+
+
+def set_up_in_the_dashboard(
+    admin: TestClient,
+    scenario: Scenario,
+    *,
+    event_name: str = "purchase",
+    treatment_key: str = "big-button",
+    start: bool = True,
+) -> None:
+    """What a user does in the dashboard before --use-running: create the metric and the
+    experiment through the admin API, then start it."""
+    metric = {"key": "purchase", "name": "Purchase", "kind": "conversion",
+              "event_name": event_name, "direction": "increase"}  # fmt: skip
+    assert admin.post("/admin/metrics", json=metric).status_code == 201
+    experiment = scenario.experiment
+    body = {
+        "key": experiment.key,
+        "name": experiment.name,
+        "hypothesis": experiment.hypothesis,
+        "traffic_bp": experiment.traffic_bp,
+        "analysis_type": experiment.analysis_type,
+        "mde_relative": experiment.mde_relative,
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": treatment_key, "name": "B", "weight_bp": 5000},
+        ],
+        "metrics": [{"metric_key": "purchase", "role": "primary", "expected_baseline": 0.1}],
+    }
+    assert admin.post("/admin/experiments", json=body).status_code == 201
+    if start:
+        assert admin.post(f"/admin/experiments/{experiment.key}/start").status_code == 200
+
+
+def test_use_running_feeds_an_experiment_started_in_the_dashboard(
+    api: TestClient, new_project: tuple[UUID, str, str]
+) -> None:
+    admin, public = clients(api, new_project)
+    set_up_in_the_dashboard(admin, small_scenario())
+
+    results = run(small_scenario(), admin, public, use_running=True)
+
+    data = results["latest"]["data"]
+    assert data["users"] == 400
+    assert data["comparisons"][0]["verdict"] == "significant_win"
+
+
+@pytest.mark.parametrize(
+    ("setup", "message"),
+    [
+        (None, "doesn't exist"),
+        ({"start": False}, "is draft, not running"),
+        ({"treatment_key": "small-button"}, "has variants"),
+        ({"event_name": "checkout"}, "counts 'checkout' events"),
+    ],
+)
+def test_use_running_refuses_an_experiment_it_cannot_feed(
+    api: TestClient,
+    new_project: tuple[UUID, str, str],
+    setup: dict[str, Any] | None,
+    message: str,
+) -> None:
+    admin, public = clients(api, new_project)
+    if setup is not None:
+        set_up_in_the_dashboard(admin, small_scenario(), **setup)
+
+    with pytest.raises(SystemExit, match=message):
+        run(small_scenario(), admin, public, use_running=True)

@@ -5,12 +5,14 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 
 ## How we work
 - One milestone at a time, in order (see the Milestones section of the PRD). Never build features from later milestones.
-- Work autonomously and back-to-back (agreed 2026-09-28). For each milestone:
+- Work autonomously within a milestone (agreed 2026-09-28), one milestone per session so each starts with a fresh context. For each milestone:
+  0. First check notes/ for a `M<N>-handoff.md` from an interrupted session, and resume from it.
   1. Plan: files, key design choices with the rejected alternative, SQL, and tests.
   2. Build, with tests alongside the code.
   3. Run the full test suite, linters, and type checks, and fix everything.
   4. Commit and push, and confirm CI is green.
-  5. Write the milestone report, then continue to the next milestone.
+  5. Write the milestone report, then stop and tell me to type /clear and "Continue with the next milestone." (the post-M2/M5/M8 code reviews get their own session too).
+- If a session has to stop mid-milestone (for example, its context is getting full), leave the work uncommitted but passing, and write notes/M<N>-handoff.md: what's done, what's left in order, and the gotchas found.
 - Don't wait for plan approval. Stop and ask only if:
   - the PRD won't work as written,
   - a dependency not in the PRD's tech stack is needed, or
@@ -37,7 +39,7 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make test: Python + SDK tests (starts the db container first)
 - make lint: ruff, mypy, eslint, tsc
 - make simulate: run Monte Carlo validation (about 30 s) and regenerate docs/results/
-- make traffic SCENARIO=checkout_button: simulated users through the running stack (scenarios/*.yaml), then print the results
+- make traffic SCENARIO=checkout_button: simulated users through the running stack (scenarios/*.yaml), then print the results. ARGS="--use-running --experiment-key <key>" feeds an experiment created and started in the dashboard
 
 ## Local environment
 - Docker runs via Colima (`colima start` after a reboot). Node 24 via Homebrew (node@24).

@@ -141,3 +141,17 @@ def test_before_any_snapshot_the_results_are_empty(api: TestClient, admin: dict[
 
     assert results["latest"] is None
     assert results["series"] == []
+
+
+def test_the_experiment_list_shows_the_latest_primary_results(
+    api: TestClient, admin: dict[str, str], sdk: dict[str, str]
+) -> None:
+    setup_experiment(api, admin)
+    assert api.get("/admin/experiments", headers=admin).json()[0]["latest_results"] is None
+    send_traffic(api, sdk, start(api, admin), users=100)
+    api.post("/admin/experiments/checkout/recompute", headers=admin)
+
+    [listed] = api.get("/admin/experiments", headers=admin).json()
+
+    assert listed["latest_results"]["users"] == 100
+    assert listed["latest_results"]["srm_flagged"] is False

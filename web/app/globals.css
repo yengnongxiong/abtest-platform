@@ -1,24 +1,37 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Design tokens. Cool paper and slate ink; one ink-blue accent. Verdict colors always come
+   with an icon and a label, never color alone. */
+@theme {
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #1c2533;
+  --color-muted: #5b6676;
+  --color-rule: #dce1e7;
+  --color-accent: #2b4a8b;
+  --color-accent-soft: #e8edf7;
+  --color-win: #1d6b45;
+  --color-win-soft: #e4f2ea;
+  --color-loss: #9f2d37;
+  --color-loss-soft: #f7e7e9;
+  --color-alert: #b42318;
+  --color-alert-soft: #fdebe9;
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-serif: var(--font-plex-serif), Georgia, serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Numbers in tables line up by digit. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

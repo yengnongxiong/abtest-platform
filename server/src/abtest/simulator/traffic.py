@@ -1,9 +1,10 @@
 """End-to-end traffic generator (PRD §16B): simulated users flow through the real API.
 
-It creates and starts an experiment through the admin API, then plays users as the SDK
-would: assign each one locally with the real assignment code, send an exposure, and sometimes
-a purchase, in batches to POST /v1/events. It finishes by asking for a fresh snapshot and
-printing it next to the true effect. The random draws are seeded, so which users convert is
+It creates and starts an experiment through the admin API (or, with use_running, feeds one
+already started from the dashboard), then plays users as the SDK would: assign each one
+locally with the real assignment code, send an exposure, and sometimes a purchase, in batches
+to POST /v1/events. It finishes by asking for a fresh snapshot and printing it next to the
+true effect. The random draws are seeded, so which users convert is
 reproducible; the timestamps are real.
 """
 
@@ -80,15 +81,23 @@ class Scenario(BaseModel):
         return cls.model_validate(yaml.safe_load(path.read_text()))
 
 
-def run(scenario: Scenario, admin: httpx2.Client, public: httpx2.Client) -> dict[str, Any]:
+def run(
+    scenario: Scenario, admin: httpx2.Client, public: httpx2.Client, use_running: bool = False
+) -> dict[str, Any]:
     """Run the scenario; return the results the API computed.
 
-    `admin` sends the server key and `public` the client key, both to the same API.
+    `admin` sends the server key and `public` the client key, both to the same API. With
+    `use_running`, the experiment must already exist and be running (say, created and started
+    in the dashboard); otherwise the generator creates and starts it.
     """
     experiment = scenario.experiment
-    _create(admin, scenario)
-    started = admin.post(f"/admin/experiments/{experiment.key}/start")
-    _check(started)
+    if use_running:
+        started_at = _check_running(admin, scenario)
+    else:
+        _create(admin, scenario)
+        started_at = _check(admin.post(f"/admin/experiments/{experiment.key}/start")).json()[
+            "started_at"
+        ]
     # Assign from the served config, exactly as the SDK does.
     config = next(
         e for e in _check(public.get("/v1/config")).json()["experiments"]
@@ -102,7 +111,7 @@ def run(scenario: Scenario, admin: httpx2.Client, public: httpx2.Client) -> dict
     rng = np.random.default_rng(scenario.seed)
     # Send events stamped at least 1 s after the start by the server's clock: this machine's
     # clock may trail the database's, and events that predate the start aren't attributed.
-    not_before = datetime.fromisoformat(started.json()["started_at"]) + timedelta(seconds=1)
+    not_before = datetime.fromisoformat(started_at) + timedelta(seconds=1)
     while datetime.now(UTC) < not_before:
         time.sleep(0.05)
 
@@ -196,6 +205,34 @@ def _create(admin: httpx2.Client, scenario: Scenario) -> None:
             f"experiment {experiment.key!r} already exists: rerun with --experiment-key <new key>"
         )
     _check(response)
+
+
+def _check_running(admin: httpx2.Client, scenario: Scenario) -> str:
+    """Check that an existing experiment can be fed this scenario; return its started_at.
+
+    The scenario's true rates are keyed by variant, and its users send the scenario's event,
+    so a mismatch would silently produce meaningless results: fail loudly instead.
+    """
+    key = scenario.experiment.key
+    response = admin.get(f"/admin/experiments/{key}")
+    if response.status_code == 404:
+        raise SystemExit(f"experiment {key!r} doesn't exist: create and start it first")
+    experiment = _check(response).json()
+    if experiment["status"] != "running":
+        raise SystemExit(f"experiment {key!r} is {experiment['status']}, not running: start it")
+    expected = sorted(v.key for v in scenario.experiment.variants)
+    actual = sorted(v["key"] for v in experiment["variants"])
+    if actual != expected:
+        raise SystemExit(f"experiment {key!r} has variants {actual}; the scenario needs {expected}")
+    primary = next(m["metric_key"] for m in experiment["metrics"] if m["role"] == "primary")
+    metric = next(m for m in _check(admin.get("/admin/metrics")).json() if m["key"] == primary)
+    if metric["event_name"] != scenario.metric.event_name:
+        raise SystemExit(
+            f"the primary metric {primary!r} counts {metric['event_name']!r} events; "
+            f"the scenario sends {scenario.metric.event_name!r}"
+        )
+    started_at: str = experiment["started_at"]
+    return started_at
 
 
 def _event(
