@@ -1,8 +1,12 @@
 /**
- * abtest-platform SDK.
+ * abtest-platform SDK: feature flags and A/B test assignment in the browser and Node 22+,
+ * with zero runtime dependencies (PRD §12).
  *
- * SDK_NAME and SDK_VERSION are sent with every event batch (`sdk: {name, version}`) so the
- * server can tell SDK releases apart. The client itself arrives in milestone M5.
+ *   const client = createClient({ clientKey, apiBaseUrl });
+ *   await client.ready();
+ *   if (client.getVariant("checkout-button") === "big-button") { ... }
+ *   client.track("purchase", { value: 42 });
  */
-export const SDK_NAME = "abtest-sdk-js";
-export const SDK_VERSION = "0.1.0";
+export { createClient } from "./client";
+export type { Client, ClientOptions, ClientStats, TrackOptions } from "./client";
+export { SDK_NAME, SDK_VERSION } from "./version";

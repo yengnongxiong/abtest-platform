@@ -274,3 +274,26 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 **Consequences.**
 - Every config write touches the project row, so concurrent config writes in one project serialize on it. At admin-dashboard write rates that costs nothing.
 - Metric changes don't bump the version: metrics aren't in the SDK config. A test checks both directions: every config write bumps it, and a metric write doesn't.
+
+---
+
+## ADR-014: How the SDK delivers events: at least once, deduplicated by the server (M5)
+
+**Context.** A browser SDK sends events over an unreliable network, from pages that can be closed or backgrounded at any moment. Each event should be stored exactly once. The page must never wait on the SDK, and the SDK must never grow without bound.
+
+**Decision.**
+- **At-least-once delivery with client-made ids.** `track()` and exposure logging fix `event_id` (a random UUID) and `occurred_at` when the event is created. Every retry resends identical events, and the server's primary key `(project_id, event_id, occurred_at)` turns a repeat into a counted duplicate (ADR-008).
+- **Retry only what can succeed.** Network errors, 5xx, and 429 are retried with exponential backoff and full jitter (a random delay up to 1 s, 2 s, 4 s, … 30 s), or exactly as long as `Retry-After` says. Any other 4xx means the batch can never be accepted: it is dropped and counted in `stats().dropped`, and so are events the API rejects individually.
+- **Bounded memory.** Past `maxQueueSize`, the oldest events are dropped and counted.
+- **Leaving the page.** On `visibilitychange` to hidden, or `pagehide`, the queue goes out with `navigator.sendBeacon`, which outlives the page. The body is `text/plain` (a CORS-safelisted type, so no preflight), and the client key goes in the query string (beacons can't set headers). Payloads are split under the browsers' 64 KB cap; a single event too big to fit is dropped and counted. If the beacon is refused, a `fetch` with `keepalive` is the fallback.
+- **Never block the page.** `ready()` resolves when the config loads or after `readyTimeoutMs`; until then `getVariant` returns null and `isEnabled` false. On a failed poll, the last good config stays in use.
+
+**Alternatives considered.**
+- *Exactly-once delivery in the client* (persisting the queue and acknowledgements in localStorage). Much more code, and still not exactly-once across tabs or crashes; server-side deduplication by id is simpler and covers every case.
+- *Retrying every error.* A 400 (for example, a malformed batch) would then be retried forever and pin the queue.
+- *Sending on `unload`/`beforeunload`.* Unreliable on mobile, where pages are frozen or killed while hidden without an unload event. `visibilitychange` to hidden is the last event mobile browsers reliably fire.
+
+**Consequences.**
+- The SDK is 2,489 bytes min+gzip (ESM build; `npm run size`, which CI runs and which fails above 5 KB).
+- Browsers cap the total size of in-flight beacons and keepalive requests at about 64 KB per page, so a very long queue can't all survive an unload; what the browser refuses is lost. The default batch size and flush interval (50 events, 5 s) keep the queue short in practice.
+- Events are stored at least once and counted once. The client's clock sets `occurred_at` (PRD §13 documents that limitation).

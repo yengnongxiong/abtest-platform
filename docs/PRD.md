@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.4 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.5 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -241,6 +241,9 @@ Public API:
 - isEnabled(flagKey): returns a boolean.
 - track(name, {value?, properties?}): creates event_id (crypto.randomUUID) and occurred_at immediately, so retries are idempotent.
 - flush(), close(), stats() (queue size and dropped count).
+  - dropped counts every event that will never be stored: queue overflow, events too big for an unload payload, batches refused with a 4xx other than 429 (retrying can't help), and events the API rejects individually.
+  - A flush sends the whole queue in batches of at most maxBatchSize, whichever way it was triggered.
+  - createClient and setUser throw a TypeError for a user id the API would reject (empty, over 200 characters, or with a lone surrogate).
 
 Behavior:
 - Config: fetch with If-None-Match, poll on the interval, and keep the last good config on failure.
@@ -466,6 +469,9 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.5 — M5 decisions (2026-09-28)
+- §12: what stats().dropped counts; a flush sends the whole queue; invalid user ids throw.
+
 ### v1.4 — M3 and M4 decisions (2026-09-28)
 - §10: variant keys follow the same format as other keys; weight_bp ≥ 1 (the SRM check needs positive shares); expected_baseline > 0.
 - §11: last-server-key guard; keys never cross kinds; stopped experiments can only be renamed; null in PATCH means unchanged; conversion baselines below 1; start errors list every problem.

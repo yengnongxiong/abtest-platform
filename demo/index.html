@@ -4,11 +4,215 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>abtest-platform demo</title>
+    <style>
+      :root {
+        --surface: #fcfcfb;
+        --card: #ffffff;
+        --ink: #0b0b0b;
+        --ink-muted: #52514e;
+        --line: #e4e3df;
+        --accent: #2a78d6;
+        --on-accent: #ffffff;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --surface: #1a1a19;
+          --card: #232322;
+          --ink: #ffffff;
+          --ink-muted: #c3c2b7;
+          --line: #3a3a38;
+          --accent: #3987e5;
+          color-scheme: dark;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--surface);
+        color: var(--ink);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+      h1 { font-size: 24px; margin: 0 0 4px; }
+      h2 { font-size: 15px; margin: 0 0 12px; }
+      p.lead { color: var(--ink-muted); margin: 0 0 24px; }
+      .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      section.wide { grid-column: 1 / -1; }
+      code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      td { padding: 6px 0; border-top: 1px solid var(--line); }
+      td:last-child { text-align: right; }
+      .muted { color: var(--ink-muted); }
+      button {
+        font: inherit;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        border-radius: 8px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .buy { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+      .buy.variant-control { padding: 6px 12px; }
+      .buy:not(.variant-control) { padding: 14px 32px; font-size: 18px; font-weight: 600; }
+      .stats { display: flex; gap: 24px; margin-bottom: 12px; }
+      .stats strong { display: block; font-size: 24px; }
+      #log { max-height: 220px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+      #log li { padding: 4px 0; border-top: 1px solid var(--line); }
+    </style>
   </head>
   <body>
     <main>
       <h1>abtest-platform demo</h1>
-      <p>This page will use the SDK to show the pipeline end to end (milestone M5).</p>
+      <p class="lead">
+        This page uses the SDK like a real site would: it assigns you to variants locally,
+        with no network call, and batches your events to the API.
+      </p>
+
+      <div class="grid">
+        <section aria-labelledby="you-title">
+          <h2 id="you-title">You</h2>
+          <p class="mono" id="user"></p>
+          <button id="new-user" type="button">Be a new user</button>
+        </section>
+
+        <section aria-labelledby="checkout-title">
+          <h2 id="checkout-title">Checkout</h2>
+          <div id="checkout"></div>
+        </section>
+
+        <section aria-labelledby="experiments-title">
+          <h2 id="experiments-title">Your variants</h2>
+          <table><tbody id="experiments"></tbody></table>
+        </section>
+
+        <section aria-labelledby="flags-title">
+          <h2 id="flags-title">Your flags</h2>
+          <table><tbody id="flags"></tbody></table>
+        </section>
+
+        <section class="wide" aria-labelledby="events-title">
+          <h2 id="events-title">Events and requests</h2>
+          <div class="stats" aria-live="polite">
+            <div><strong id="queued">0</strong><span class="muted">queued</span></div>
+            <div><strong id="dropped">0</strong><span class="muted">dropped</span></div>
+          </div>
+          <button id="flush" type="button">Send queued events now</button>
+          <p class="muted">Every request the SDK makes, newest first:</p>
+          <ul id="log" class="mono"></ul>
+        </section>
+      </div>
     </main>
+
+    <script src="config.js"></script>
+    <script type="module">
+      import { createClient } from "./sdk/index.js";
+
+      const { apiBaseUrl, clientKey } = window.DEMO_CONFIG;
+      const log = document.getElementById("log");
+
+      // Hand the SDK a fetch that also records each request, to show batching, ETags,
+      // and retries as they happen.
+      async function loggingFetch(input, init) {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        try {
+          const response = await fetch(input, init);
+          addLog(`${method} ${url.pathname} -> ${response.status}`);
+          return response;
+        } catch (error) {
+          addLog(`${method} ${url.pathname} -> network error`);
+          throw error;
+        }
+      }
+
+      function addLog(text) {
+        const item = document.createElement("li");
+        item.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+        log.prepend(item);
+      }
+
+      const client = createClient({ clientKey, apiBaseUrl, fetch: loggingFetch, flushIntervalMs: 3000 });
+      await client.ready();
+
+      // The page lists running experiments and flags from the public config. Assigning
+      // the user is the SDK's job (getVariant, isEnabled), and happens locally.
+      async function publicConfig() {
+        const response = await fetch(`${apiBaseUrl}/v1/config`, { headers: { "X-Client-Key": clientKey } });
+        return response.ok ? response.json() : { experiments: [], flags: [] };
+      }
+
+      function row(label, value) {
+        const tr = document.createElement("tr");
+        for (const text of [label, value]) {
+          const td = document.createElement("td");
+          td.textContent = text;
+          tr.append(td);
+        }
+        return tr;
+      }
+
+      async function render() {
+        const config = await publicConfig();
+        document.getElementById("user").textContent = userId;
+
+        const experiments = document.getElementById("experiments");
+        experiments.replaceChildren(
+          ...config.experiments.map((e) => row(e.key, client.getVariant(e.key) ?? "not included")),
+        );
+        if (config.experiments.length === 0) {
+          experiments.append(row("No running experiments yet", ""));
+        }
+
+        const flags = document.getElementById("flags");
+        flags.replaceChildren(
+          ...config.flags.map((f) => row(f.key, client.isEnabled(f.key) ? "on" : "off")),
+        );
+        if (config.flags.length === 0) {
+          flags.append(row("No flags yet", ""));
+        }
+
+        const checkout = document.getElementById("checkout");
+        const variant = client.getVariant("checkout-button");
+        if (variant === null) {
+          checkout.innerHTML =
+            '<p class="muted">Start an experiment with key <code>checkout-button</code> to see ' +
+            "its variants here (the control gets the small button).</p>";
+        } else {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `buy variant-${variant}`;
+          button.textContent = "Buy now";
+          button.addEventListener("click", () => client.track("purchase", { value: 49 }));
+          const note = document.createElement("p");
+          note.className = "muted";
+          note.textContent = `You see variant "${variant}". Clicking tracks a purchase.`;
+          checkout.replaceChildren(button, note);
+        }
+      }
+
+      let userId = localStorage.getItem("abtest_anonymous_id") ?? "anonymous";
+      document.getElementById("new-user").addEventListener("click", () => {
+        userId = `demo-${crypto.randomUUID().slice(0, 8)}`;
+        client.setUser(userId);
+        render();
+      });
+      document.getElementById("flush").addEventListener("click", () => client.flush());
+      setInterval(() => {
+        const { queued, dropped } = client.stats();
+        document.getElementById("queued").textContent = queued;
+        document.getElementById("dropped").textContent = dropped;
+      }, 500);
+
+      render();
+    </script>
   </body>
 </html>

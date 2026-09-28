@@ -100,7 +100,13 @@ services:
           path: ./web/package-lock.json
 
   demo:
-    build: ./demo
+    build:
+      context: ./demo
+      additional_contexts:
+        sdk-src: ./sdk-js # the image builds the SDK and serves it next to the page
+    environment:
+      ABTEST_CLIENT_KEY: ${ABTEST_CLIENT_KEY}
+      DEMO_API_URL: http://localhost:8000 # as the browser sees the API
     ports:
       - "8080:80"
     healthcheck:
@@ -111,10 +117,10 @@ services:
     develop:
       watch:
         - action: sync
-          path: ./demo
-          target: /usr/share/nginx/html
-          ignore:
-            - Dockerfile
+          path: ./demo/index.html
+          target: /usr/share/nginx/html/index.html
+        - action: rebuild # the SDK changed: rebuild it into the image
+          path: ./sdk-js/src
 
 volumes:
   pgdata:
