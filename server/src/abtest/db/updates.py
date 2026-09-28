@@ -22,7 +22,7 @@ def set_columns(
     nothing from the request is ever pasted into SQL. The column names come from a request
     model that forbids unknown fields.
     """
-    if not changes:
+    if not changes and not touch:
         return
     assignments: list[sql.Composable] = [
         sql.SQL("{} = {}").format(sql.Identifier(column), sql.Placeholder(column))

@@ -63,11 +63,14 @@ def test_etag_and_not_modified(api: TestClient, sdk: dict[str, str]) -> None:
 
     assert etag == f'"config-{first.json()["config_version"]}"'
     assert first.headers["Cache-Control"] == "max-age=30"
+    # The config depends on the key header: shared caches must not serve it across projects.
+    assert "X-Client-Key" in first.headers["Vary"].split(", ")
     for if_none_match in (etag, f"W/{etag}", f'"config-0", {etag}', "*"):
         again = api.get("/v1/config", headers={**sdk, "If-None-Match": if_none_match})
         assert again.status_code == 304, if_none_match
         assert again.content == b""
         assert again.headers["ETag"] == etag
+        assert "X-Client-Key" in again.headers["Vary"].split(", ")
     stale = api.get("/v1/config", headers={**sdk, "If-None-Match": '"config-0"'})
     assert stale.status_code == 200
 

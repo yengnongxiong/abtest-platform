@@ -25,10 +25,10 @@ make dev
 
 ## SDK
 
-`sdk-js/` is a TypeScript SDK with zero runtime dependencies, for browsers and Node 22+. It is **2,489 bytes min+gzip** (ESM build, measured by `cd sdk-js && npm run build && npm run size`).
+`sdk-js/` is a TypeScript SDK with zero runtime dependencies, for browsers and Node 22+. It is **2,556 bytes min+gzip** (ESM build, measured by `cd sdk-js && npm run build && npm run size`). It isn't published to npm: build it with `npm run build` and use `sdk-js/dist/index.js` (ESM) or `dist/index.cjs`.
 
 ```ts
-import { createClient } from "abtest-sdk-js";
+import { createClient } from "./sdk/index.js"; // sdk-js/dist/index.js
 
 const client = createClient({ clientKey: "ck_...", apiBaseUrl: "https://api.example.com" });
 await client.ready(); // never blocks longer than readyTimeoutMs (2 s by default)

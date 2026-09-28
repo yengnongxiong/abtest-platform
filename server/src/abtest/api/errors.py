@@ -51,7 +51,14 @@ async def http_error(request: Request, exc: Exception) -> JSONResponse:
     return error_response(exc.status_code, code, str(exc.detail), headers=exc.headers)
 
 
+async def internal_error(request: Request, exc: Exception) -> JSONResponse:
+    """Anything unexpected: a 500 in the same format, with no internals in the body. The
+    server still logs the exception."""
+    return error_response(500, "internal_error", "something went wrong on the server")
+
+
 def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(DomainError, domain_error)
     app.add_exception_handler(RequestValidationError, validation_error)
     app.add_exception_handler(HTTPException, http_error)
+    app.add_exception_handler(Exception, internal_error)

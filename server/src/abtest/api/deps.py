@@ -39,7 +39,8 @@ def server_project(conn: ConnDep, authorization: Annotated[str | None, Header()]
 
     Server keys are only ever read from this header, never from a URL (PRD §19).
     """
-    scheme, _, key = (authorization or "").partition(" ")
+    scheme, _, key = (authorization or "").strip().partition(" ")
+    key = key.strip()
     project = project_for_key(conn, key, "server") if scheme.lower() == "bearer" else None
     if project is None:
         raise Unauthorized(

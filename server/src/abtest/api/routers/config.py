@@ -12,6 +12,9 @@ router = APIRouter(prefix="/v1", tags=["public"])
 
 # SDKs poll every 30 s anyway; a shared cache may serve a copy for that long.
 CACHE_CONTROL = "max-age=30"
+# Each project gets its own config at the same URL, chosen by the X-Client-Key header. Without
+# this, a CDN or proxy could serve one project's config to another project's SDK.
+VARY = "X-Client-Key"
 
 
 def etag_for(version: int) -> str:
@@ -37,9 +40,12 @@ def get_config(
     """The running experiments and all flags. Answers 304 when the SDK's copy is current."""
     etag = etag_for(config_version(conn, project))
     if matches(if_none_match, etag):
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": CACHE_CONTROL})
+        return Response(
+            status_code=304, headers={"ETag": etag, "Cache-Control": CACHE_CONTROL, "Vary": VARY}
+        )
     config = load_config(conn, project)
     # The version read with the content, which may be newer than the one checked above.
     response.headers["ETag"] = etag_for(config.config_version)
     response.headers["Cache-Control"] = CACHE_CONTROL
+    response.headers["Vary"] = VARY
     return config

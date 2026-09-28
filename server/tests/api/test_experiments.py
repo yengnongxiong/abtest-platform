@@ -237,7 +237,7 @@ def test_clone_reruns_a_stopped_experiment_as_a_draft(
 def test_a_draft_can_replace_its_variants(
     api: TestClient, admin: dict[str, str], metrics: None
 ) -> None:
-    api.post("/admin/experiments", json=design(), headers=admin)
+    created = api.post("/admin/experiments", json=design(), headers=admin).json()
     three_way = [
         {"key": "a", "name": "A", "weight_bp": 3300, "is_control": True},
         {"key": "b", "name": "B", "weight_bp": 3300},
@@ -253,6 +253,7 @@ def test_a_draft_can_replace_its_variants(
         ("b", 1),
         ("c", 2),
     ]
+    assert response.json()["updated_at"] > created["updated_at"]
 
 
 def test_a_conversion_baseline_must_be_a_rate(

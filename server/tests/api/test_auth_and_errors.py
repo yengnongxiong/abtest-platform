@@ -6,6 +6,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from abtest.api.app import create_app
+from abtest.config import Settings
+
 
 def assert_error(response_json: object, code: str) -> None:
     assert isinstance(response_json, dict)
@@ -120,3 +123,26 @@ def test_unknown_fields_are_rejected_not_ignored(api: TestClient, admin: dict[st
     response = api.post("/admin/flags", json={"key": "typo", "rollout": 5000}, headers=admin)
 
     assert response.status_code == 422
+
+
+def test_unexpected_errors_use_the_error_format_and_hide_internals(api_database: str) -> None:
+    app = create_app(Settings(database_url=api_database))
+
+    @app.get("/boom")
+    def boom() -> None:
+        raise RuntimeError("internal detail that must not leak")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/boom")
+
+    assert response.status_code == 500
+    assert_error(response.json(), "internal_error")
+    assert "internal detail" not in response.text
+
+
+def test_extra_spaces_around_the_key_are_tolerated(
+    api: TestClient, new_project: tuple[UUID, str, str]
+) -> None:
+    response = api.get("/admin/flags", headers={"Authorization": f"  Bearer   {new_project[1]} "})
+
+    assert response.status_code == 200

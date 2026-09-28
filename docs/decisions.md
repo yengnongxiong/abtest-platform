@@ -294,6 +294,6 @@ Raising `traffic_bp` only admits users whose traffic bucket falls in the new ran
 - *Sending on `unload`/`beforeunload`.* Unreliable on mobile, where pages are frozen or killed while hidden without an unload event. `visibilitychange` to hidden is the last event mobile browsers reliably fire.
 
 **Consequences.**
-- The SDK is 2,489 bytes min+gzip (ESM build; `npm run size`, which CI runs and which fails above 5 KB).
+- The SDK is 2,556 bytes min+gzip (ESM build; `npm run size`, which CI runs and which fails above 5 KB).
 - Browsers cap the total size of in-flight beacons and keepalive requests at about 64 KB per page, so a very long queue can't all survive an unload; what the browser refuses is lost. The default batch size and flush interval (50 events, 5 s) keep the queue short in practice.
 - Events are stored at least once and counted once. The client's clock sets `occurred_at` (PRD §13 documents that limitation).

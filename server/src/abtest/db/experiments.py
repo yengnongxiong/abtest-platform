@@ -128,7 +128,8 @@ def update_experiment(
                     "traffic can only go up while an experiment runs: lowering it would drop "
                     "users who were already assigned",
                 )
-        set_columns(conn, "experiments", current.id, changes, touch=True)
+        if changes or replaced:
+            set_columns(conn, "experiments", current.id, changes, touch=True)
         if data.variants is not None:
             _replace_variants(conn, current.id, data.variants)
         if data.metrics is not None:

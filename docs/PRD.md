@@ -187,7 +187,7 @@ Public endpoints:
 GET /v1/config
 - Response: {config_version, flags:[{key, enabled, rollout_bp}], experiments:[{key, traffic_bp, variants:[{key, weight_bp, position}]}]}. Running experiments only.
 - ETag = "config-<version>"; a matching If-None-Match returns 304.
-- Cache-Control: max-age=30.
+- Cache-Control: max-age=30, with Vary: X-Client-Key (the content depends on that header).
 
 POST /v1/events
 - Request body: {sdk:{name, version}, events:[{event_id, user_id, name, occurred_at, value?, properties?}]}.
@@ -470,7 +470,8 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 
 ## 24. Changelog
 ### v1.5 — M5 decisions (2026-09-28)
-- §12: what stats().dropped counts; a flush sends the whole queue; invalid user ids throw.
+- §12: what stats().dropped counts; a flush sends the whole queue; invalid user ids throw; events JSON can't encode are dropped at track() time.
+- §11: GET /v1/config also sends `Vary: X-Client-Key`, so a shared cache never serves one project's config to another.
 
 ### v1.4 — M3 and M4 decisions (2026-09-28)
 - §10: variant keys follow the same format as other keys; weight_bp ≥ 1 (the SRM check needs positive shares); expected_baseline > 0.

@@ -103,7 +103,8 @@ export function createClient(options: ClientOptions): Client {
         return; // unchanged, or a failure: keep the last good config
       }
       const body: unknown = await response.json();
-      if (isConfig(body)) {
+      // A slow poll can answer after a newer one: never go back to an older config.
+      if (isConfig(body) && (config === null || body.config_version >= config.config_version)) {
         config = body;
         etag = response.headers.get("ETag");
       }
@@ -124,6 +125,15 @@ export function createClient(options: ClientOptions): Client {
     setInterval(() => void loadConfig(), configPollIntervalMs),
     setInterval(() => void flush(), flushIntervalMs),
   ];
+
+  /** Queue a new event, or count it as dropped if it couldn't be built (see newEvent). */
+  function record(event: WireEvent | null): void {
+    if (event === null) {
+      dropped += 1;
+      return;
+    }
+    enqueue(event);
+  }
 
   function enqueue(event: WireEvent): void {
     if (closed) {
@@ -246,12 +256,17 @@ export function createClient(options: ClientOptions): Client {
       if (experiment === undefined) {
         return null;
       }
-      const variant = assign(experiment.key, userId, experiment.traffic_bp, experiment.variants);
+      let variant: string | null;
+      try {
+        variant = assign(experiment.key, userId, experiment.traffic_bp, experiment.variants);
+      } catch {
+        return null; // a malformed config must never break the host page
+      }
       const seen = `${experiment.key}\n${userId}`;
       if (variant !== null && !exposed.has(seen)) {
         exposed.add(seen);
         const properties = { experiment_key: experiment.key, variant_key: variant };
-        enqueue(newEvent("$exposure", userId, { properties }));
+        record(newEvent("$exposure", userId, { properties }));
       }
       return variant;
     },
@@ -262,7 +277,7 @@ export function createClient(options: ClientOptions): Client {
     },
 
     track(name: string, trackOptions?: TrackOptions): void {
-      enqueue(newEvent(name, userId, trackOptions));
+      record(newEvent(name, userId, trackOptions));
     },
 
     flush,
@@ -287,8 +302,13 @@ export function createClient(options: ClientOptions): Client {
 /**
  * The event's id and time are fixed here, at track() time, and never change: a retried
  * batch resends identical events, which the API recognizes as duplicates (PRD §10, §12).
+ *
+ * Returns null for an event that can't be sent as JSON: a value that isn't a finite number,
+ * or properties with a circular reference or a BigInt. Caught here, such an event is
+ * dropped alone; caught at send time, it would fail its whole batch on every retry and
+ * block every later event behind it.
  */
-function newEvent(name: string, userId: string, options?: TrackOptions): WireEvent {
+function newEvent(name: string, userId: string, options?: TrackOptions): WireEvent | null {
   const event: WireEvent = {
     event_id: crypto.randomUUID(),
     user_id: userId,
@@ -296,10 +316,19 @@ function newEvent(name: string, userId: string, options?: TrackOptions): WireEve
     occurred_at: new Date().toISOString(),
   };
   if (options?.value !== undefined) {
+    if (!Number.isFinite(options.value)) {
+      return null;
+    }
     event.value = options.value;
   }
   if (options?.properties !== undefined) {
-    event.properties = options.properties;
+    try {
+      // A snapshot, too: later changes to the caller's object can't alter a retry.
+      const snapshot: Record<string, unknown> = JSON.parse(JSON.stringify(options.properties));
+      event.properties = snapshot;
+    } catch {
+      return null;
+    }
   }
   return event;
 }

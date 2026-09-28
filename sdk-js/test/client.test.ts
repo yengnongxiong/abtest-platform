@@ -151,6 +151,40 @@ describe("config and evaluation", () => {
   });
 });
 
+describe("robustness", () => {
+  test("a slow, older config never replaces a newer one", async () => {
+    const releaseOld: { resolve?: (r: Response) => void } = {};
+    let call = 0;
+    const api = fakeApi({
+      config: () => {
+        call += 1;
+        if (call === 1) {
+          return new Promise<Response>((resolve) => (releaseOld.resolve = resolve));
+        }
+        return json({ ...CONFIG, config_version: 4, flags: [] }, { ETag: '"config-4"' });
+      },
+    });
+    const sdk = client(api, { configPollIntervalMs: 1_000, readyTimeoutMs: 10 });
+
+    await vi.advanceTimersByTimeAsync(1_000); // the second poll answers first: version 4
+    releaseOld.resolve?.(json(CONFIG, { ETag: '"config-3"' })); // then the first: version 3
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sdk.isEnabled("dark-mode")).toBe(false); // still version 4, which has no flags
+  });
+
+  test("a malformed config makes getVariant return null instead of throwing", async () => {
+    const broken = {
+      ...CONFIG,
+      experiments: [{ key: "broken", traffic_bp: 10_000, variants: [] }],
+    };
+    const sdk = client(fakeApi({ config: () => json(broken) }));
+    await sdk.ready();
+
+    expect(sdk.getVariant("broken")).toBeNull();
+  });
+});
+
 describe("exposures", () => {
   test("are logged once per experiment and user per page session", async () => {
     const api = fakeApi({});
@@ -222,6 +256,34 @@ describe("tracking and batching", () => {
       "event-3",
       "event-4",
     ]);
+  });
+
+  test("an event JSON can't encode is dropped alone and never blocks later events", async () => {
+    // Regression: such an event used to fail its batch on every retry, forever.
+    const api = fakeApi({});
+    const sdk = client(api);
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    sdk.track("bad", { properties: circular });
+    sdk.track("bad-value", { value: Number.NaN });
+    sdk.track("good");
+    await sdk.flush();
+
+    expect(api.eventBatches().flatMap((b) => b.events.map((e) => e.name))).toEqual(["good"]);
+    expect(sdk.stats()).toEqual({ queued: 0, dropped: 2 });
+  });
+
+  test("properties are snapshotted at track() time", async () => {
+    const api = fakeApi({});
+    const sdk = client(api);
+    const properties = { plan: "pro" };
+
+    sdk.track("purchase", { properties });
+    properties.plan = "changed later";
+    await sdk.flush();
+
+    expect(api.eventBatches()[0]?.events[0]?.properties).toEqual({ plan: "pro" });
   });
 
   test("events the API rejects are counted as dropped", async () => {
