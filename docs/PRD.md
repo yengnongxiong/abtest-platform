@@ -1,5 +1,5 @@
 # PRD: abtest-platform — Feature Flags & A/B Testing Platform
-Owner: Yengnong Xiong · Status: v1.2 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
+Owner: Yengnong Xiong · Status: v1.3 (see §24 Changelog) · Type: Portfolio project (PM + SWE)
 
 ## 1. Summary
 abtest-platform is a self-hostable feature flag and A/B testing platform.
@@ -278,7 +278,7 @@ Summaries:
 - MeanSummary(n, sum, sum_sq), with mean and sample variance (n − 1)
 
 Tests:
-- Abstract base class StatisticalTest with compare(control, treatment, alpha), which returns ComparisonResult(abs_diff, rel_lift, ci_low, ci_high, rel_ci_low, rel_ci_high, p_value, significant).
+- Abstract base class StatisticalTest with compare(control, treatment, alpha), which returns ComparisonResult(abs_diff, rel_lift, ci_low, ci_high, rel_ci_low, rel_ci_high, p_value, significant, insufficient_data).
 - TwoProportionZTest: pooled standard error for the p-value; unpooled standard error for the CI of the difference; delta method for the relative lift CI. Two-sided.
 - WelchTTest: Welch–Satterthwaite degrees of freedom; p-value and CI from the t-distribution.
 - MSPRT (sequential test; normal approximation; Johari et al., "Peeking at A/B Tests"). For a difference estimate θ̂ with variance V and mixing variance τ²:
@@ -290,17 +290,20 @@ Tests:
   - The worker carries the running-min p-value and CI intersection across snapshots.
     - compare() takes that previous state as an input and returns the new state, so the engine stays pure.
   - Relative-lift CI = the always-valid absolute CI ÷ the control mean (a plug-in approximation, labeled as such in the UI).
+  - If the intersected CI becomes empty (the looks disagree; probability ≤ α when the model holds), no CI is reported. The p-value and significance still are.
 
 Other functions:
 - srm_check(observed_counts, expected_weights): chi-square goodness-of-fit p-value. Flag SRM if p < 0.001.
-- sample_size_two_proportions(baseline, mde_relative, alpha, power): returns n per variant.
+- sample_size_two_proportions(baseline, mde_relative, alpha, power): returns n per variant. mde_relative is a positive fraction, and the formula targets baseline × (1 + mde_relative).
 - Verdict for the UI:
   - significant_win or significant_loss (respecting the metric's direction)
   - not_significant
   - srm_untrustworthy
+  - insufficient_data
 - Insufficient data never crashes the engine; the result says "insufficient data" instead. This covers:
   - a variant with fewer than 2 users
-  - a control mean of 0 (relative lift is undefined)
+  - no variation: every user within each variant has the same value, so there is no standard error
+  - a control mean ≤ 0: only the relative-lift fields are left empty (undefined at 0; a misleading sign below 0)
   - SRM expected counts under 5 (the chi-square approximation doesn't hold, so the check is skipped)
 - Multiple comparisons (3+ variants, many secondary metrics) are not corrected in the MVP. The primary metric's verdict is the decision. Document this as a limitation.
 
@@ -460,6 +463,13 @@ Every milestone ends with tests passing, lint and type checks clean, and its acc
 - a Playwright e2e test of the dashboard
 
 ## 24. Changelog
+### v1.3 — M1 stats engine (2026-09-28)
+Edge cases the engine had to decide; each is written into §14.
+- ComparisonResult carries insufficient_data (the reason), and the verdict gains insufficient_data.
+- Zero variance counts as insufficient data. Relative lift needs a control mean > 0, not just ≠ 0.
+- mSPRT: an empty intersected CI is reported as no CI.
+- Sample size: mde_relative is a positive fraction, and the target is baseline × (1 + mde_relative).
+
 ### v1.2 — after M0 (2026-09-28)
 - §8: httpx2 replaces httpx (approved).
 - Repo: MIT license (approved).

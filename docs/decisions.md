@@ -71,3 +71,54 @@ npm dependencies are saved with exact versions (`--save-exact`), and the lock fi
 - tsup has already cost us one workaround. Its declaration build always sets `baseUrl`, which TypeScript 6 deprecates, so `tsup.config.ts` silences that one deprecation for the declaration step only. Moving to TypeScript 7 will mean replacing tsup, most likely with tsdown.
 - Starlette 1.7 deprecates `httpx` for its test client in favor of `httpx2`, httpx's maintained successor (same author, now under the Pydantic org; httpx's last release was December 2024). We switched to `httpx2` after M0, with approval (PRD v1.2).
 - Revisit Node when 26 becomes LTS (2026-10-28), and TypeScript when typescript-eslint supports 7.
+
+---
+
+## ADR-004: A pure statistics engine, with every formula written out (M1)
+
+**Context.** The worker (M7), the Monte Carlo simulator (M2), and the sample-size endpoint (M4) all need the statistics, and the project's credibility rests on those numbers being right. PRD §14 fixes the formulas. The open questions were what the engine takes as input, whether to write the formulas ourselves or call library test functions, and what happens when there isn't enough data.
+
+**Decision.**
+- **Inputs are per-variant summaries, not raw rows.** `ProportionSummary(n, successes)` for conversions and `MeanSummary(n, sum, sum_sq)` for means. SQL reduces every user to these numbers in one pass, and the engine never touches the database. Both types expose the variant's mean and the variance of that mean, which is all the mSPRT and the delta method need, so one implementation of each serves both metric kinds.
+- **Every formula is written out in `abtest/stats`.** SciPy supplies only distribution functions (normal, t, chi-square), and each docstring cites its source.
+- **Tests compare against independent implementations**: statsmodels (`proportions_ztest`, `confint_proportions_2indep`, `CompareMeans`, `samplesize_proportions_2indep_onetail`), SciPy (`ttest_ind`, `chisquare`, normal densities for the mSPRT likelihood ratio), and textbook examples that we recomputed before using. statsmodels stays test-only, as the PRD requires.
+- **Insufficient data returns a result, never an exception.** `ComparisonResult` leaves every number as `None` and says why in `insufficient_data`. Invalid arguments (alpha outside (0, 1), more conversions than users) are caller bugs and raise `ValueError`.
+- `StatisticalTest[S]` is a generic abstract base class with one method, `compare(control, treatment, alpha)`. `MSPRT.compare` adds an optional `previous` state (ADR-005).
+- A test (`test_stats_purity.py`) parses every module in `abtest/stats` and fails on any import outside an allowlist (a few standard-library modules such as `math` and `dataclasses`, plus SciPy), so the "no DB, web, or I/O" rule is enforced, not just promised.
+
+**Alternatives considered.**
+- *Call statsmodels or SciPy test functions in production code.* Less code, but the cross-check tests would then compare a library with itself, and statsmodels pulls pandas and patsy into the server image.
+- *A vectorized NumPy engine that analyzes many simulated experiments at once.* Faster for M2, but harder to read and to type-check. M2 can vectorize the data generation and still call this engine for each analysis.
+- *Raw per-user rows as input.* The worker would have to load every user of every experiment into memory.
+
+**Consequences.**
+- A formula change has to keep agreeing with statsmodels, SciPy, and the textbook examples.
+- `MeanSummary` computes the variance with the one-pass formula `(sum_sq - sum^2/n) / (n - 1)`. It loses precision only when the variance is tiny relative to the squared mean, which per-user metric values are not; rounding below zero is clamped to 0.
+- SciPy becomes a runtime dependency of the server (it is in the PRD's stack).
+
+---
+
+## ADR-005: Sequential testing with mSPRT, and how τ is chosen (M1)
+
+**Context.** The dashboard shows results that refresh every few minutes, and PMs look at them whenever they like. A fixed-horizon p-value that is checked repeatedly, with the experiment stopped at the first p < 0.05, has a false-positive rate far above 5%: the "peeking" problem this project exists to demonstrate. The analysis has to stay valid under continuous monitoring, at looks nobody planned in advance.
+
+**Decision.**
+- Use the mixture sequential probability ratio test (mSPRT) with a normal mixing distribution and the normal approximation (Johari, Koomen, Pekelis & Walsh, KDD 2017). It gives an always-valid p-value, the running minimum of 1/Λ, and an always-valid CI, the running intersection of the per-look intervals. `analysis_type` defaults to `sequential`.
+- **τ (the mixing standard deviation) is set per metric, at start:** τ = expected_baseline × mde_relative, in the metric's own units (PRD v1.1). The guarantee holds for any fixed τ; putting τ on each metric's scale is what gives each metric sensible power.
+- **The caller carries the state between looks.** `compare(..., previous=state)` returns the new running-minimum p-value and CI intersection. The engine stays pure, and the worker (M7) stores the state with each snapshot.
+- **The p-value and the CI use the same unpooled variance**, so "significant" and "the CI excludes 0" always agree, which a test checks at every look. The fixed-horizon z-test can't promise this, because its p-value uses the pooled standard error.
+- **Computed in log space**, because Λ itself overflows a float once the evidence is overwhelming.
+- **An empty CI intersection is shown as no CI.** When looks disagree so much that no effect size is consistent with all of them (probability at most α when the model holds; in practice a sign that the effect changed over time), the p-value and verdict are still reported.
+- The relative-lift CI is the absolute CI divided by the control mean: a plug-in approximation, labeled as such in the UI (M8).
+
+**Alternatives considered.**
+- *Group sequential designs* (O'Brien–Fleming boundaries, alpha spending). They have more power at the planned looks, but need the number and timing of looks, and a maximum sample size, fixed upfront. A dashboard is looked at whenever someone opens it.
+- *Bayesian analysis.* A non-goal for the MVP (PRD §3).
+- *Fixed-horizon tests only, and trusting people not to peek.* That is exactly the failure mode the project demonstrates.
+- *One τ for every metric of an experiment.* Still valid, but a τ sized for a 10% conversion rate is badly scaled for revenue in dollars, so secondary and guardrail metrics would lose power.
+
+**Consequences.**
+- At the same sample size, mSPRT intervals are wider than fixed-horizon ones: that is the price of being allowed to look at any time. M2's power simulation measures the cost.
+- A badly chosen τ costs power, never validity.
+- The guarantee assumes the normal approximation with a variance estimated from the data. M2's `aa_sequential` scenario measures the real false-positive rate.
+- The worker must keep the state for each (experiment, metric) pair and never reset it. `/recompute` just adds a look, which is safe under mSPRT.

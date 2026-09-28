@@ -9,6 +9,7 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "scipy>=1.18.1",
     "uvicorn>=0.54.0",
 ]
 
@@ -16,8 +17,11 @@ dependencies = [
 dev = [
     "httpx2>=2.13.1",
     "mypy>=2.3.1",
+    "numpy>=2.5.3",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
+    "scipy-stubs>=1.18.1.1",
+    "statsmodels>=0.15.0",
 ]
 
 [build-system]
@@ -36,6 +40,12 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+
+# statsmodels ships no type information. It is a test-only dependency, used to cross-check
+# the stats engine.
+[[tool.mypy.overrides]]
+module = ["statsmodels.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
