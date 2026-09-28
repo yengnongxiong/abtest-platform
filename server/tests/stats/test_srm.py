@@ -31,7 +31,8 @@ def test_matches_scipy_chisquare(seed: int) -> None:
 
 
 def test_flags_a_real_mismatch() -> None:
-    # 50/50 split, but treatment lost about 5% of its users: chi-square = 12.2, p = 0.0005.
+    # 50/50 split, but treatment lost about 5% of its users:
+    # chi-square = (250^2 + 250^2) / 10,000 = 12.5 on 1 df, p = 0.0004.
     result = srm_check([10_250, 9_750], [5000, 5000])
 
     assert result.p_value is not None and result.p_value < 0.001

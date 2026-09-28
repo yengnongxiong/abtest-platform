@@ -37,5 +37,6 @@ lint:
 migrate:
 	@echo "make migrate: the migration runner arrives in milestone M3 (docs/PRD.md §22)." && exit 1
 
+# Run from the repo root so the results land in docs/results.
 simulate:
-	@echo "make simulate: the Monte Carlo validator arrives in milestone M2 (docs/PRD.md §22)." && exit 1
+	uv run --project server python -m abtest.simulator validate --seed 42

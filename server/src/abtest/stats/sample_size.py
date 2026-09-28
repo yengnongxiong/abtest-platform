@@ -44,3 +44,27 @@ def sample_size_two_proportions(
         + z_power * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
     ) ** 2 / (p2 - p1) ** 2
     return math.ceil(n)
+
+
+def power_two_proportions(
+    baseline: float, mde_relative: float, alpha: float, n_per_variant: int
+) -> float:
+    """Chance that a two-sided z-test at level alpha, with n_per_variant users per variant,
+    finds a significant lift when the true rate is baseline * (1 + mde_relative).
+
+    It solves the sample_size_two_proportions formula for the power instead of n:
+
+        power = Phi((|p2 - p1| sqrt(n) - z_(1 - alpha/2) sqrt(2 p_bar (1 - p_bar)))
+                    / sqrt(p1 (1 - p1) + p2 (1 - p2)))
+
+    Source: Fleiss, Levin & Paik (2003), chapter 4. Only the tail in the effect's direction
+    counts. A "significant" result in the wrong direction is a mistake, not a detection.
+    """
+    p1 = baseline
+    p2 = baseline * (1 + mde_relative)
+    p_bar = (p1 + p2) / 2
+    z_alpha = float(norm.ppf(1 - alpha / 2))
+    z_power = (
+        abs(p2 - p1) * math.sqrt(n_per_variant) - z_alpha * math.sqrt(2 * p_bar * (1 - p_bar))
+    ) / math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    return float(norm.cdf(z_power))

@@ -36,7 +36,7 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make migrate: apply SQL migrations (arrives in M3)
 - make test: Python + SDK tests (starts the db container first)
 - make lint: ruff, mypy, eslint, tsc
-- make simulate: run Monte Carlo validation and regenerate docs/results/ (arrives in M2)
+- make simulate: run Monte Carlo validation (about 30 s) and regenerate docs/results/
 
 ## Local environment
 - Docker runs via Colima (`colima start` after a reboot). Node 24 via Homebrew (node@24).

@@ -122,3 +122,27 @@ npm dependencies are saved with exact versions (`--save-exact`), and the lock fi
 - A badly chosen τ costs power, never validity.
 - The guarantee assumes the normal approximation with a variance estimated from the data. M2's `aa_sequential` scenario measures the real false-positive rate.
 - The worker must keep the state for each (experiment, metric) pair and never reset it. `/recompute` just adds a look, which is safe under mSPRT.
+
+---
+
+## ADR-006: How the Monte Carlo validation simulates and judges (M2)
+
+**Context.** PRD §16A asks for simulations that prove the statistics behave as claimed: false-positive rates under A/A tests (analyzed once, peeked at, and sequentially), power, SRM detection, and Welch on skewed data. The suite has to be seeded, use the real stats engine, and run in about two minutes on a laptop. The results go in the README, so the way they're judged has to be defensible.
+
+**Decision.**
+- **Users arrive in blocks, simulated with binomial draws.** For each block of users (one per look), the number landing in control is Binomial(block, 1/2), and each variant's conversions are Binomial(users, rate). That is exactly the distribution you'd get by simulating each user, at the cost of a few array operations per experiment, whatever the sample size.
+- **Only the data generation is vectorized.** Every analysis calls the real engine (`TwoProportionZTest`, `MSPRT` with its carried state, `srm_check`, `WelchTTest`, `verdict`) once per experiment per look, as the worker will.
+- **One independent random stream per scenario** (`SeedSequence(seed).spawn`). Resizing one scenario never changes another's numbers, and a rerun with the same seed reproduces `docs/results/summary.md` exactly (checked by running it twice and diffing).
+- **Pass/fail comes from binomial error, not taste.** The acceptance range for a false-positive rate is the central 95% range of Binomial(experiments, α) / experiments, where a perfectly calibrated test lands 95% of the time. Every rate is reported with an exact (Clopper–Pearson) 95% CI. The fast pytest versions allow 3.29 binomial standard errors, and compare against theory where it exists: the z-test's analytic power curve, and the noncentral chi-square power of the SRM check.
+- **Power counts a detection only as a significant *win*,** judged by the real `verdict`. τ is baseline × the true lift, as if the PM had pre-registered the true effect as the MDE.
+- **SRM false alarms are measured at one look and across 20 looks.** The PRD asks for one false-alarm rate. The repeated-look rate is what a dashboard that re-checks every snapshot actually produces.
+
+**Alternatives considered.**
+- *Simulating individual users with hashed IDs.* Closer to production, but orders of magnitude slower. Hash uniformity gets its own chi-square test in M4.
+- *Vectorized re-implementations of the tests for speed.* That would validate a copy of the engine, not the engine.
+- *Hand-picked pass bands* (say, "the false-positive rate is between 4% and 6%"). Arbitrary, and too loose or too strict depending on the number of experiments.
+
+**Consequences.**
+- `make simulate` takes about half a minute on a laptop. The measured runtime and machine are written into `summary.md` on every run.
+- The simulated traffic is stationary and independent: no day-of-week cycles, novelty effects, or correlated users. The results say the math is right, not that real traffic is this well behaved.
+- The look schedule (a look every 1,000 users in the A/A scenarios) is part of the result: naive peeking gets worse with more looks, and the mSPRT does not.

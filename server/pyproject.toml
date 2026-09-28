@@ -5,6 +5,8 @@ description = "abtest-platform server: API, worker, statistics engine, and simul
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.141.1",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
     "psycopg-pool>=3.3.3",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
@@ -17,7 +19,6 @@ dependencies = [
 dev = [
     "httpx2>=2.13.1",
     "mypy>=2.3.1",
-    "numpy>=2.5.3",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
     "scipy-stubs>=1.18.1.1",
