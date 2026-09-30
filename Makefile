@@ -6,7 +6,7 @@
 -include .env
 export
 
-.PHONY: setup dev down migrate test lint simulate traffic seed perf loadtest
+.PHONY: setup dev down migrate test lint simulate traffic seed perf loadtest screenshots
 
 # Copy the example only when .env is missing, so local edits are never overwritten.
 .env:
@@ -30,8 +30,8 @@ test: .env
 	cd sdk-js && npm test
 
 lint:
-	cd server && uv run ruff check . ../loadtest && uv run ruff format --check . ../loadtest \
-		&& uv run mypy
+	cd server && uv run ruff check . ../loadtest ../scripts \
+		&& uv run ruff format --check . ../loadtest ../scripts && uv run mypy
 	cd sdk-js && npm run lint && npm run typecheck
 	cd web && npm run lint && npm run typecheck
 
@@ -86,3 +86,8 @@ loadtest: .env
 		--host http://localhost:8001 --users $(LOADTEST_USERS) --spawn-rate $(LOADTEST_USERS) \
 		--run-time $(LOADTEST_TIME) --reset-stats; \
 	status=$$?; docker stop $(LOADTEST_API) > /dev/null; exit $$status
+
+# The README's screenshots (docs/screenshots/), taken with Playwright from a run against an
+# empty stack: see scripts/README.md.
+screenshots: .env
+	uv run --project server python scripts/screenshots.py

@@ -1,4 +1,10 @@
-"""Attribution queries and results snapshots (PRD §13, §15)."""
+"""Attribution queries and results snapshots (PRD §13, §15).
+
+Attribution decides which events count for whom: `AGGREGATE` reduces an experiment's users to
+per-variant totals in one SQL pass, so the stats engine never sees raw rows (ADR-004, ADR-016).
+Each result is stored as a snapshot, and the stored series is the mSPRT's history of looks
+(ADR-018).
+"""
 
 from datetime import datetime, timedelta
 from uuid import UUID

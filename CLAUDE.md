@@ -44,6 +44,7 @@ A feature flag + A/B testing platform built as a portfolio project for PM and SW
 - make seed EVENTS=10000000: recreate the separate abtest_perf database and fill it with that many events via COPY (10M took 3.5 minutes on the M9 machine)
 - make perf: on abtest_perf, EXPLAIN of the attribution query with and without its index, a worker look and the results read, then row-by-row vs batch inserts
 - make loadtest LOADTEST_USERS=32 LOADTEST_WORKERS=1: Locust against an API on abtest_perf (no --reload, rate limit raised) for LOADTEST_TIME (60s)
+- make screenshots: regenerate docs/screenshots/ with Playwright against an empty stack (`COMPOSE_PROJECT_NAME=abtest-screens make dev`; see scripts/README.md)
 
 ## Local environment
 - Docker runs via Colima (`colima start` after a reboot). Node 24 via Homebrew (node@24).
