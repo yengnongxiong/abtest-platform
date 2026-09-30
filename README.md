@@ -167,7 +167,7 @@ flowchart LR
 - **Quality control.** Tests are written with the code, and every bug fix gets a regression test. Rules are enforced by checks, not trust (table below), and the whole repo was reviewed after M2, M5, and M8, and in a final health check.
 - **Product judgment.** The calls where I overruled or redirected the agent:
   - Kickoff: I answered the design questions from its PRD review myself, such as giving each metric its own sequential-test setting so secondary metrics keep their power ([PRD v1.1](docs/PRD.md#v11--kickoff-review-2026-09-27)).
-  - M9: when the 10-million-event load tests made my fanless laptop very hot, I stopped them and kept the measurements already taken ([performance.md](docs/performance.md#1-setup)).
+  - M9: when the 10-million-event load tests caused extreme heavy stress on hardware, I stopped them and kept the measurements already taken ([performance.md](docs/performance.md#1-setup)).
   - M10: I dropped the planned hosted deployment: no budget, and visitors would see only a sign-in page ([ADR-022](docs/decisions.md#adr-022-no-hosted-deployment-the-local-stack-is-the-demo-m10)).
   - After one very long session produced worse code, I changed how sessions run ([CLAUDE.md](CLAUDE.md#how-we-work)).
 
