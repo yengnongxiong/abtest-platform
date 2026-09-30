@@ -19,6 +19,11 @@ import { Controls } from "./Controls";
 import { LiftChart, type LiftPoint } from "./LiftChart";
 import { SrmGate } from "./SrmGate";
 
+/**
+ * One experiment: its controls, results, protocol, and changelog (PRD §17). Results come from
+ * the worker's latest snapshot, never computed here. A flagged sample ratio mismatch hides them
+ * behind a warning, because a broken traffic split makes any lift untrustworthy.
+ */
 export default async function ExperimentPage({ params, searchParams }: PageProps<"/experiments/[key]">) {
   const { key } = await params;
   const { metric: requested } = await searchParams;

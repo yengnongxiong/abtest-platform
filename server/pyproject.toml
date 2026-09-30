@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "locust>=2.46.6",
     "mypy>=2.3.1",
+    "playwright>=1.63.0",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
     "scipy-stubs>=1.18.1.1",
@@ -44,7 +45,8 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 strict = true
 # loadtest/ holds the performance scripts (PRD §7); its modules import each other by name.
-files = ["src", "tests", "scripts", "../loadtest"]
+# ../scripts holds repo tools, such as the README screenshots.
+files = ["src", "tests", "scripts", "../loadtest", "../scripts"]
 mypy_path = "../loadtest"
 plugins = ["pydantic.mypy"]
 

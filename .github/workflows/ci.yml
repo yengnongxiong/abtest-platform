@@ -43,8 +43,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: server/uv.lock
       - run: uv sync --locked
-      - run: uv run ruff check . ../loadtest
-      - run: uv run ruff format --check . ../loadtest
+      - run: uv run ruff check . ../loadtest ../scripts
+      - run: uv run ruff format --check . ../loadtest ../scripts
       - run: uv run mypy
       - run: uv run pytest
 
